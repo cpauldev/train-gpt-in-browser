@@ -7,7 +7,6 @@ const PRECACHE_URLS = [
   "./dreamphrasegpt.png",
   "./datasets/english_words.txt",
   "./datasets/us_baby_names.txt",
-  "./datasets/varied_text.txt",
 ];
 
 self.addEventListener("install", (event) => {
