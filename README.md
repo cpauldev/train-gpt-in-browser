@@ -12,6 +12,8 @@ Example outputs trained on U.S. baby names include `Miryella`, `Beliana`, `Camil
 
 *Training runs in a Web Worker using TensorFlow.js with WebGPU (where supported) or CPU fallback. Runs are saved and resumable via IndexedDB and OPFS.*
 
+*[DreamPhraseGPT](https://github.com/cpauldev/dreamphrase-gpt) is the Python/PyTorch counterpart. It supports CUDA, Apple Silicon / MPS, optional `torch.compile`, ONNX export, and a CLI artifact manager. The core architecture and datasets are shared between both.*
+
 ---
 
 <!-- demo video or screenshot -->
@@ -49,10 +51,6 @@ The model is a decoder-only, character-level GPT implemented in TensorFlow.js. I
 - Built-in Bloom filter that rejects exact source-line matches at generation time
 
 Training runs in a dedicated Web Worker to keep the UI responsive. WebGPU is used automatically where available; CPU is the fallback.
-
-## Python version
-
-[DreamPhraseGPT](https://github.com/cpauldev/dreamphrase-gpt) is the Python/PyTorch counterpart. It supports CUDA, Apple Silicon / MPS, optional `torch.compile`, ONNX export, and a CLI artifact manager. The core architecture and datasets are shared between both.
 
 ## Dev
 
