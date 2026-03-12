@@ -25,7 +25,7 @@ bun install
 bun run dev
 ```
 
-Open `http://localhost:5173`, pick a built-in dataset or upload your own `.txt` file, and click **Train**.
+Open `http://localhost:5173`, select a built-in dataset or upload your own `.txt` file, and click **Start training**.
 
 ## Datasets
 
