@@ -61,6 +61,7 @@ export function TrainingLiveStats({
   const theme = useAppTheme();
   const frozenChartAnchorRef = useRef<{
     anchorSeconds: number;
+    chartVariantKey: string;
     runId: string | null;
     updatedAt: number;
   } | null>(null);
@@ -83,8 +84,10 @@ export function TrainingLiveStats({
   );
   const metricOption = METRIC_OPTIONS.find((option) => option.valueKey === selectedMetric);
   const latestElapsedSeconds = latestPoint?.elapsedTimeSeconds ?? 0;
+  const chartVariantKey = `${selectedMetric}:${selectedWindowSeconds}`;
   const chartLatestWallClockSeconds = getChartLatestWallClockSeconds({
     anchorRef: frozenChartAnchorRef,
+    chartVariantKey,
     isTraining,
     latestPoint,
     run,
@@ -292,15 +295,18 @@ function formatElapsedChartTime(seconds: number) {
 
 function getChartLatestWallClockSeconds({
   anchorRef,
+  chartVariantKey,
   isTraining,
   latestPoint,
   run,
 }: {
   anchorRef: MutableRefObject<{
     anchorSeconds: number;
+    chartVariantKey: string;
     runId: string | null;
     updatedAt: number;
   } | null>;
+  chartVariantKey: string;
   isTraining: boolean;
   latestPoint: ChartTelemetryPoint | null;
   run: TrainingRunRecord | null;
@@ -318,13 +324,19 @@ function getChartLatestWallClockSeconds({
   const runId = run?.id ?? null;
   const updatedAt = run?.updatedAt ?? 0;
   const cachedAnchor = anchorRef.current;
-  if (cachedAnchor && cachedAnchor.runId === runId && cachedAnchor.updatedAt === updatedAt) {
+  if (
+    cachedAnchor &&
+    cachedAnchor.runId === runId &&
+    cachedAnchor.updatedAt === updatedAt &&
+    cachedAnchor.chartVariantKey === chartVariantKey
+  ) {
     return cachedAnchor.anchorSeconds;
   }
 
   const nextAnchorSeconds = Date.now() / 1000;
   anchorRef.current = {
     anchorSeconds: nextAnchorSeconds,
+    chartVariantKey,
     runId,
     updatedAt,
   };

@@ -106,13 +106,37 @@ describe("TrainingLiveStats", () => {
 
     expect(screen.getByTestId("liveline").textContent).toBe("11:1.5|12:1.25:#eb6f36:0:02");
 
+    // Switching metrics re-anchors data to Date.now() so Liveline's fresh internal clock
+    // (also initialized to Date.now()) matches the latest data point time.
     dateNowSpy.mockReturnValue(30_000);
     await user.click(screen.getByRole("button", { name: "Tokens/s" }));
-    expect(screen.getByTestId("liveline").textContent).toBe("11:128|12:256:#2f8f5b:0:02");
+    expect(screen.getByTestId("liveline").textContent).toBe("29:128|30:256:#2f8f5b:0:02");
 
     dateNowSpy.mockReturnValue(45_000);
     await user.click(screen.getByRole("button", { name: "Steps/s" }));
-    expect(screen.getByTestId("liveline").textContent).toBe("11:2.5|12:3.25:#3a76f0:0:02");
+    expect(screen.getByTestId("liveline").textContent).toBe("44:2.5|45:3.25:#3a76f0:0:02");
+
+    dateNowSpy.mockRestore();
+  });
+
+  it("preserves elapsed training time when switching metrics after a delay on a completed run", async () => {
+    const user = userEvent.setup();
+    const dateNowSpy = vi.spyOn(Date, "now");
+
+    // Page loads 1 minute after training finished (the run still shows 2s of elapsed time).
+    dateNowSpy.mockReturnValue(12_000);
+    render(<TrainingLiveStats isTraining={false} run={createRun()} />);
+    expect(screen.getByTestId("liveline").textContent).toBe("11:1.5|12:1.25:#eb6f36:0:02");
+
+    // Wait another minute, then switch metrics. Without the fix, Liveline would remount
+    // with its internal clock at Date.now() = 72s while data was still anchored to 12s,
+    // making the right edge of the chart show "1:02" (62 extra seconds) instead of "0:02".
+    dateNowSpy.mockReturnValue(72_000);
+    await user.click(screen.getByRole("button", { name: "Tokens/s" }));
+
+    // Data point times must be re-anchored to the new Date.now() (72s) so Liveline's
+    // fresh clock matches the latest point and the elapsed timer stays correct.
+    expect(screen.getByTestId("liveline").textContent).toBe("71:128|72:256:#2f8f5b:0:02");
 
     dateNowSpy.mockRestore();
   });
