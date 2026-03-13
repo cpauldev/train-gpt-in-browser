@@ -199,9 +199,7 @@ export type StoredRunArtifact = Omit<RunArtifactFile, "storage" | "value"> & {
   value?: ArrayBuffer;
 };
 
-export type PersistedTrainingRunRecord = Omit<TrainingRunRecord, "checkpoint"> & {
-  checkpoint?: SerializedCheckpoint;
-};
+export type PersistedTrainingRunRecord = Omit<TrainingRunRecord, "checkpoint">;
 
 export type TrainerCommand =
   | {

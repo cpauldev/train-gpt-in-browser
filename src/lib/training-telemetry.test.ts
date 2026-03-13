@@ -21,29 +21,6 @@ function createPoint(overrides?: Partial<TrainingTelemetryPoint>): TrainingTelem
 }
 
 describe("training-telemetry", () => {
-  it("normalizes legacy wall-clock telemetry into cumulative elapsed training time", () => {
-    const timeline = resolveTrainingTelemetryTimeline([
-      createPoint({
-        loss: 1.5,
-        step: 100,
-        stepsPerSecond: 20,
-        time: 1_000,
-        tokPerSecond: 2_560,
-        totalTokens: 12_800,
-      }),
-      createPoint({
-        loss: 1.25,
-        step: 200,
-        stepsPerSecond: 20,
-        time: 4_600,
-        tokPerSecond: 2_560,
-        totalTokens: 25_600,
-      }),
-    ]);
-
-    expect(timeline.map((point) => point.elapsedTimeSeconds)).toEqual([5, 10]);
-  });
-
   it("preserves explicit elapsed training time for newer telemetry points", () => {
     const points = [
       createPoint({

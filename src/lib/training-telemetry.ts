@@ -2,7 +2,6 @@ import type { TrainingTelemetryPoint } from "@/lib/trainer-types";
 
 const MAX_TELEMETRY_POINTS = 1200;
 export const TRAINING_TELEMETRY_PERSIST_INTERVAL_MS = 2_000;
-const MAX_LEGACY_WALL_CLOCK_DELTA_SECONDS = 1;
 
 export function appendTrainingTelemetryPoint(
   current: TrainingTelemetryPoint[],
@@ -50,15 +49,7 @@ export function resolveTrainingTelemetryTimeline(points: TrainingTelemetryPoint[
       tokPerSecond: point.tokPerSecond,
       tokenDelta,
     });
-    const fallbackElapsedSeconds =
-      previousPoint &&
-      Number.isFinite(point.time) &&
-      Number.isFinite(previousPoint.time) &&
-      point.time >= previousPoint.time
-        ? Math.min(point.time - previousPoint.time, MAX_LEGACY_WALL_CLOCK_DELTA_SECONDS)
-        : 0;
-    const nextElapsedSeconds =
-      previousElapsedSeconds + (estimatedElapsedSeconds ?? fallbackElapsedSeconds);
+    const nextElapsedSeconds = previousElapsedSeconds + (estimatedElapsedSeconds ?? 0);
 
     previousPoint = point;
     previousElapsedSeconds = nextElapsedSeconds;

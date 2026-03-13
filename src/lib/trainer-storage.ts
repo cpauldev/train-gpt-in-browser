@@ -361,15 +361,6 @@ async function inflatePersistedRun(
 ) {
   const hydratedRun = hydratePersistedRunShape(persistedRun);
 
-  if (hydratedRun.checkpoint) {
-    const migratedRun: TrainingRunRecord = {
-      ...hydratedRun,
-      checkpoint: cloneCheckpoint(hydratedRun.checkpoint),
-    };
-    await saveTrainingRun(migratedRun);
-    return migratedRun;
-  }
-
   const checkpointRecord = await db.get("checkpoints", hydratedRun.id);
   if (checkpointRecord?.checkpoint) {
     return {
@@ -378,98 +369,9 @@ async function inflatePersistedRun(
     } satisfies TrainingRunRecord;
   }
 
-  const legacyArtifactSet = await getLegacyArtifactSet(db, hydratedRun.id);
-  if (!legacyArtifactSet) {
-    return {
-      ...hydratedRun,
-    } satisfies TrainingRunRecord;
-  }
-
-  const { parseDreamPhraseArtifactSet } = await import("@/lib/dreamphrase-artifacts");
-  const checkpoint = parseDreamPhraseArtifactSet({
-    modelArtifact: legacyArtifactSet.modelState.value,
-    resumeArtifact: legacyArtifactSet.resumeState.value,
-  });
-  const migratedRun: TrainingRunRecord = {
-    ...hydratedRun,
-    checkpoint,
-  };
-
-  await saveTrainingRun(migratedRun);
-  if (legacyArtifactSet.bundle) {
-    await saveTrainingRunArtifacts(migratedRun, {
-      model: {
-        fileName: legacyArtifactSet.bundle.fileName,
-        kind: "model",
-        mimeType: legacyArtifactSet.bundle.mimeType,
-        value: cloneArrayBuffer(legacyArtifactSet.bundle.value),
-      },
-    });
-  }
-  await deleteLegacyArtifactRecords(db, hydratedRun.id);
-
   return {
     ...hydratedRun,
-    checkpoint,
   } satisfies TrainingRunRecord;
-}
-
-async function getLegacyArtifactSet(db: IDBPDatabase<TrainerDbSchema>, runId: string) {
-  const runArtifacts = (await listStoredRunArtifacts(db, runId)) as Array<
-    StoredRunArtifact & { kind: string }
-  >;
-
-  const bundle = runArtifacts.find((artifact) => String(artifact.kind) === "bundle");
-  const modelState = runArtifacts.find((artifact) => String(artifact.kind) === "model_pt");
-  const resumeState = runArtifacts.find((artifact) => String(artifact.kind) === "resume_pt");
-
-  if (!modelState?.value || !resumeState?.value || (bundle && !bundle.value)) {
-    return null;
-  }
-  const bundleArtifact = bundle?.value
-    ? {
-        fileName: bundle.fileName,
-        kind: bundle.kind,
-        mimeType: bundle.mimeType,
-        value: cloneArrayBuffer(bundle.value),
-      }
-    : null;
-
-  return {
-    bundle: bundleArtifact,
-    modelState: {
-      fileName: modelState.fileName,
-      kind: modelState.kind,
-      mimeType: modelState.mimeType,
-      value: cloneArrayBuffer(modelState.value),
-    },
-    resumeState: {
-      fileName: resumeState.fileName,
-      kind: resumeState.kind,
-      mimeType: resumeState.mimeType,
-      value: cloneArrayBuffer(resumeState.value),
-    },
-  };
-}
-
-async function deleteLegacyArtifactRecords(db: IDBPDatabase<TrainerDbSchema>, runId: string) {
-  const transaction = db.transaction("artifacts", "readwrite");
-  const artifacts = (await listStoredRunArtifacts(db, runId)) as Array<
-    StoredRunArtifact & { kind: string }
-  >;
-
-  await Promise.all(
-    artifacts
-      .filter(
-        (artifact) =>
-          String(artifact.kind) === "bundle" ||
-          String(artifact.kind) === "model_pt" ||
-          String(artifact.kind) === "resume_pt",
-      )
-      .map((artifact) => transaction.store.delete(artifact.id)),
-  );
-
-  await transaction.done;
 }
 
 function artifactSetToList(artifactSet: RunArtifactSet) {
@@ -492,16 +394,8 @@ async function updateStoredWorkspaceFile(
 }
 
 async function listStoredRunArtifacts(db: IDBPDatabase<TrainerDbSchema>, runId: string) {
-  const artifactIds = [
-    buildArtifactId(runId, "model"),
-    `${runId}:bundle`,
-    `${runId}:model_pt`,
-    `${runId}:resume_pt`,
-  ];
-  const artifacts = await Promise.all(
-    artifactIds.map((artifactId) => db.get("artifacts", artifactId)),
-  );
-  return artifacts.filter((artifact): artifact is StoredRunArtifact => Boolean(artifact));
+  const artifact = await db.get("artifacts", buildArtifactId(runId, "model"));
+  return artifact ? [artifact] : [];
 }
 
 async function persistStoredArtifact(runId: string, artifact: RunArtifactFile, updatedAt: number) {
