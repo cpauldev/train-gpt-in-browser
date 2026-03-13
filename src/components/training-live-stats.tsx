@@ -65,7 +65,7 @@ export function TrainingLiveStats({
     updatedAt: number;
   } | null>(null);
   const [selectedMetric, setSelectedMetric] = useState<TrainingMetricKey>("loss");
-  const [selectedWindowSeconds, setSelectedWindowSeconds] = useState<number>(300);
+  const [selectedWindowSeconds, setSelectedWindowSeconds] = useState<number>(60);
   const telemetry = run?.telemetry ?? [];
   const normalizedTelemetry = useMemo(
     () => resolveTrainingTelemetryTimeline(telemetry),
@@ -125,14 +125,18 @@ export function TrainingLiveStats({
   const animatedTotalTokens = useAnimatedValue(latestPoint?.totalTokens ?? 0, {
     enabled: animating,
   });
+  const displayedLoss = latestPoint ? animatedLoss : undefined;
+  const displayedTokPerSecond = latestPoint ? animatedTokPerSecond : undefined;
+  const displayedStepsPerSecond = latestPoint ? animatedStepsPerSecond : undefined;
+  const displayedTotalTokens = latestPoint ? animatedTotalTokens : undefined;
   const progressLabel = latestPoint
     ? `${Math.floor(animatedStep).toLocaleString("en-US")} / ${latestPoint.totalSteps.toLocaleString("en-US")}`
     : "Waiting to start";
   const statCards = [
-    { label: "Loss", value: formatLossValue(animatedLoss) },
-    { label: "Tokens/s", value: formatRateValue(animatedTokPerSecond) },
-    { label: "Steps/s", value: formatRateValue(animatedStepsPerSecond) },
-    { label: "Tokens processed", value: formatCountValue(animatedTotalTokens) },
+    { label: "Loss", value: formatLossValue(displayedLoss) },
+    { label: "Tokens/s", value: formatRateValue(displayedTokPerSecond) },
+    { label: "Steps/s", value: formatRateValue(displayedStepsPerSecond) },
+    { label: "Tokens processed", value: formatCountValue(displayedTotalTokens) },
   ];
 
   return (

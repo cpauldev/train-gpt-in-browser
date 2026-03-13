@@ -81,6 +81,13 @@ function createRun(): TrainingRunRecord {
 }
 
 describe("TrainingLiveStats", () => {
+  it("shows dashes before any training history exists", () => {
+    render(<TrainingLiveStats isTraining={false} run={null} />);
+
+    expect(screen.getAllByText("—")).toHaveLength(4);
+    expect(screen.getByText(/waiting to start/i)).toBeTruthy();
+  });
+
   it("shows Tokens/s and Steps/s metric labels", () => {
     render(<TrainingLiveStats isTraining={false} run={createRun()} />);
 
