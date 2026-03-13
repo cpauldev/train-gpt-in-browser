@@ -275,10 +275,6 @@ export function iterHashIndices(text: string, bitCount: number, hashCount: numbe
   return results;
 }
 
-export function formatFileSize(bytes: number) {
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
 export function formatNumber(value: number) {
   return value.toLocaleString("en-US");
 }

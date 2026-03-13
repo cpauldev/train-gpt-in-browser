@@ -11,7 +11,6 @@ import type {
   BackendPreference,
   ModelConfig,
   OptimizerStateSnapshot,
-  RunArtifactFile,
   RunArtifactKind,
   RunArtifactSet,
   SerializedCheckpoint,
@@ -157,10 +156,6 @@ export function getRunArtifactFile(artifactSet: RunArtifactSet, kind: RunArtifac
       throw new Error(`Unsupported artifact kind: ${String(exhaustive)}`);
     }
   }
-}
-
-export function listRunArtifactFiles(artifactSet: RunArtifactSet): RunArtifactFile[] {
-  return [getRunArtifactFile(artifactSet, "model")];
 }
 
 function parseOptimizerState(

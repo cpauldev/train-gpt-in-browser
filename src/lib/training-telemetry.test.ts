@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { TrainingTelemetryPoint } from "@/lib/trainer-types";
 import {
   getLatestTrainingTelemetryElapsedSeconds,
-  resolveTrainingTelemetryTimeline,
   shouldPersistTrainingTelemetry,
   TRAINING_TELEMETRY_PERSIST_INTERVAL_MS,
 } from "@/lib/training-telemetry";

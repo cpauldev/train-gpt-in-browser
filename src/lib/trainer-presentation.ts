@@ -58,10 +58,6 @@ export function formatDurationSeconds(totalSeconds: number): string {
   return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
 }
 
-export function formatEtaSeconds(totalSeconds: number): string {
-  return formatDurationSeconds(totalSeconds);
-}
-
 export function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`;
