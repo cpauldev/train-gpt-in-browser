@@ -1,6 +1,7 @@
 import { RunPanel } from "@/components/run-panel";
 import { SidebarEditorView } from "@/components/sidebar-editor-view";
 import { SidebarListView } from "@/components/sidebar-list-view";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -12,16 +13,28 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useIsMobile } from "@/hooks/use-media-query";
 import { useAppTheme } from "@/lib/app-theme";
 import { useBrowserTrainer } from "@/lib/use-browser-trainer";
 import { useWorkspaceEditor } from "@/lib/use-workspace-editor";
+import { useState } from "react";
 
 const REPO_URL = "https://github.com/cpauldev/train-gpt-in-browser";
 
 export default function App() {
+  const isMobile = useIsMobile();
   const theme = useAppTheme();
   const trainer = useBrowserTrainer();
   const workspaceEditor = useWorkspaceEditor(trainer);
+  const [mobileTab, setMobileTab] = useState<"run" | "workspace">("run");
+
+  const workspacePanel = workspaceEditor.isEditorOpen ? (
+    <SidebarEditorView {...workspaceEditor.editorViewProps} />
+  ) : (
+    <SidebarListView {...workspaceEditor.listViewProps} />
+  );
+
+  const runPanel = <RunPanel {...workspaceEditor.runPanelProps} repoUrl={REPO_URL} />;
 
   return (
     <TooltipProvider delay={200}>
@@ -29,21 +42,38 @@ export default function App() {
         open={workspaceEditor.resetDialogOpen}
         onOpenChange={workspaceEditor.setResetDialogOpen}
       >
-        <main className="min-h-screen bg-background text-foreground xl:h-screen xl:overflow-hidden">
-          <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-5 sm:px-6 xl:h-full xl:min-h-0">
-            <section className="grid min-h-0 flex-1 gap-6 lg:grid-cols-2 xl:overflow-hidden">
-              <section className="overflow-hidden xl:h-full xl:min-h-0">
-                {workspaceEditor.isEditorOpen ? (
-                  <SidebarEditorView {...workspaceEditor.editorViewProps} />
-                ) : (
-                  <SidebarListView {...workspaceEditor.listViewProps} />
-                )}
-              </section>
+        <main className="h-dvh overflow-hidden bg-background text-foreground lg:h-screen">
+          <div className="mx-auto flex h-full w-full max-w-6xl flex-col px-3 py-3 lg:min-h-0 lg:px-6 lg:py-5">
+            {isMobile ? (
+              <Tabs
+                value={mobileTab}
+                onValueChange={(value) => setMobileTab(value as "run" | "workspace")}
+                className="min-h-0 flex-1 gap-3"
+              >
+                <div className="px-1">
+                  <TabsList variant="underline" className="w-full">
+                    <TabsTab value="run">Run</TabsTab>
+                    <TabsTab value="workspace">Workspace</TabsTab>
+                  </TabsList>
+                </div>
 
-              <section className="overflow-hidden xl:h-full xl:min-h-0">
-                <RunPanel {...workspaceEditor.runPanelProps} repoUrl={REPO_URL} />
+                <TabsPanel value="run" className="min-h-0 flex-1">
+                  <section className="h-full min-h-0 overflow-hidden">{runPanel}</section>
+                </TabsPanel>
+
+                <TabsPanel value="workspace" className="min-h-0 flex-1">
+                  <section className="h-full min-h-0 overflow-hidden">{workspacePanel}</section>
+                </TabsPanel>
+              </Tabs>
+            ) : (
+              <section className="grid min-h-0 flex-1 gap-6 lg:grid-cols-2 lg:overflow-hidden">
+                <section className="overflow-hidden lg:h-full lg:min-h-0">{runPanel}</section>
+
+                <section className="overflow-hidden lg:h-full lg:min-h-0">
+                  {workspacePanel}
+                </section>
               </section>
-            </section>
+            )}
           </div>
         </main>
 

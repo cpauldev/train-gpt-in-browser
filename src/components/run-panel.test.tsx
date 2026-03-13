@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RunPanel } from "@/components/run-panel";
 import { DEFAULT_GENERATION_CONFIG, DEFAULT_TRAINING_CONFIG } from "@/lib/trainer-defaults";
@@ -72,6 +72,38 @@ function createRun(): TrainingRunRecord {
     trainingConfig: DEFAULT_TRAINING_CONFIG,
     updatedAt: Date.now(),
   };
+}
+
+const originalMatchMedia = window.matchMedia;
+
+afterEach(() => {
+  if (originalMatchMedia) {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: originalMatchMedia,
+      writable: true,
+    });
+    return;
+  }
+
+  Reflect.deleteProperty(window, "matchMedia");
+});
+
+function mockMatchMedia(matches: boolean) {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      addEventListener: vi.fn(),
+      addListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      matches: query.includes("(max-width: 1023px)") ? matches : false,
+      media: query,
+      onchange: null,
+      removeEventListener: vi.fn(),
+      removeListener: vi.fn(),
+    })),
+    writable: true,
+  });
 }
 
 describe("RunPanel", () => {
@@ -204,5 +236,30 @@ describe("RunPanel", () => {
         /train a small character-level gpt directly in your browser.*resumes from browser checkpoints/i,
       ),
     ).toBeTruthy();
+  });
+
+  it("renders generated results as a single column on mobile", () => {
+    mockMatchMedia(true);
+
+    render(
+      <RunPanel
+        activeRun={createRun()}
+        activeTab="generated"
+        displayedResults={["alpha", "beta"]}
+        generationConfig={DEFAULT_GENERATION_CONFIG}
+        isGenerating={false}
+        isHydrating={false}
+        onGenerate={vi.fn()}
+        onTabChange={vi.fn()}
+        onTemperatureChange={vi.fn()}
+        onToggleLike={vi.fn()}
+        repoUrl="https://github.com/cpauldev/train-gpt-in-browser"
+        workerReady={true}
+      />,
+    );
+
+    expect(screen.getByText("alpha").closest("tr")?.textContent).toContain("alpha");
+    expect(screen.getByText("alpha").closest("tr")?.textContent).not.toContain("beta");
+    expect(screen.getByText("beta").closest("tr")?.textContent).toBe("beta");
   });
 });

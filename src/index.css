@@ -182,7 +182,7 @@ body {
   --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
   --foreground: color-mix(in srgb, var(--color-zinc-50) 92%, var(--color-white));
   --input: --alpha(var(--color-white) / 7%);
-  --muted: color-mix(in srgb, var(--background) 84%, var(--color-zinc-900));
+  --muted: color-mix(in srgb, var(--background) 72%, var(--color-zinc-800));
   --muted-foreground: color-mix(in srgb, var(--color-zinc-400) 88%, var(--color-white));
   --popover: color-mix(in srgb, var(--background) 90%, var(--color-zinc-900));
   --popover-foreground: var(--color-zinc-100);

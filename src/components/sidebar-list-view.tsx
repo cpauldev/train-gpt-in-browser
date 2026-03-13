@@ -32,18 +32,18 @@ export function SidebarListView({
   onCreateFile: () => void;
   onResetLocalData: () => void;
   onImportClick: () => void;
-  onOpenFile: (file: WorkspaceFile) => Promise<void>;
+  onOpenFile: (file: WorkspaceFile) => void | Promise<void>;
   runs: TrainingRunRecord[];
 }) {
   const runByFileId = new Map(runs.map((run) => [run.fileId, run]));
 
   return (
-    <Frame className="h-full overflow-hidden xl:min-h-0">
+    <Frame className="h-full overflow-hidden lg:min-h-0">
       <SidebarFrameHeader onResetLocalData={onResetLocalData} title="Workspace" />
 
       <FramePanel className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
         <ScrollArea className="flex-1" scrollFade scrollbarGutter>
-          <div className="space-y-2 px-5 py-5">
+          <div className="space-y-2 px-4 py-4 lg:px-5 lg:py-5">
             {isHydrating ? (
               <PanelLoadingState className="min-h-[18rem]" />
             ) : files.length === 0 ? (
@@ -67,9 +67,13 @@ export function SidebarListView({
           </div>
         </ScrollArea>
 
-        <div className="border-t border-border/70 px-5 py-4">
-          <div className="flex items-stretch">
-            <Button onClick={onCreateFile} className="min-w-0 flex-1 gap-2" disabled={isImporting}>
+        <div className="border-t border-border/70 px-4 py-4 lg:px-5">
+          <div className="flex flex-col items-stretch gap-2 lg:flex-row lg:gap-0">
+            <Button
+              onClick={onCreateFile}
+              className="min-w-0 w-full gap-2 lg:flex-1"
+              disabled={isImporting}
+            >
               <Plus className="size-4" />
               New Dataset
             </Button>
@@ -78,7 +82,7 @@ export function SidebarListView({
                 render={
                   <Button
                     variant="outline"
-                    className="ml-2 min-w-0 flex-1 gap-2"
+                    className="min-w-0 w-full gap-2 lg:ml-2 lg:flex-1"
                     aria-label={isImporting ? "Importing files" : "Upload files"}
                     disabled={isImporting}
                   />
@@ -105,7 +109,7 @@ function DatasetListButton({
   run,
 }: {
   file: WorkspaceFile;
-  onOpenFile: (file: WorkspaceFile) => Promise<void>;
+  onOpenFile: (file: WorkspaceFile) => void | Promise<void>;
   run?: TrainingRunRecord;
 }) {
   return (

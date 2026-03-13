@@ -36,7 +36,7 @@ export function SidebarFrameHeader({
         </Button>
       ) : null}
 
-      <FrameTitle className="min-w-0 flex-1 truncate text-base sm:text-sm">{title}</FrameTitle>
+      <FrameTitle className="min-w-0 flex-1 truncate text-base lg:text-sm">{title}</FrameTitle>
 
       <Menu>
         <MenuTrigger

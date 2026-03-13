@@ -164,9 +164,9 @@ export function SidebarEditorView({
 
   if (!selectedFile || !selectedFileSummary) {
     return (
-      <Frame className="h-full overflow-hidden xl:min-h-0">
+      <Frame className="h-full overflow-hidden lg:min-h-0">
         <SidebarFrameHeader onBack={onBack} onResetLocalData={onResetLocalData} title="Workspace" />
-        <FramePanel className="flex flex-1 items-center justify-center xl:min-h-0">
+        <FramePanel className="flex flex-1 items-center justify-center lg:min-h-0">
           <Empty>
             <EmptyHeader>
               <EmptyTitle>Select a file</EmptyTitle>
@@ -181,7 +181,7 @@ export function SidebarEditorView({
   }
 
   return (
-    <Frame className="h-full overflow-hidden xl:min-h-0">
+    <Frame className="h-full overflow-hidden lg:min-h-0">
       <SidebarFrameHeader
         onBack={onBack}
         onResetLocalData={onResetLocalData}
@@ -194,8 +194,8 @@ export function SidebarEditorView({
           onValueChange={(value) => setActiveTab(value as "overview" | "training" | "source")}
           className="min-h-0 flex-1 gap-0"
         >
-          <div className="border-b border-border/70 px-5 pt-4">
-            <TabsList variant="underline">
+          <div className="border-b border-border/70 px-4 pt-3 lg:px-5 lg:pt-4">
+            <TabsList variant="underline" className="min-w-max">
               <TabsTab value="overview">
                 <LayoutPanelTop className="opacity-60" />
                 Overview
@@ -214,9 +214,9 @@ export function SidebarEditorView({
           <TabsPanel value="overview" className="min-h-0 p-0">
             <div className="flex h-full min-h-0 flex-col">
               <ScrollArea className="flex-1" scrollFade scrollbarGutter>
-                <div className="space-y-6 px-5 py-5">
+                <div className="space-y-6 px-4 py-4 lg:px-5 lg:py-5">
                   <section className="space-y-4">
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-col items-start justify-between gap-3 lg:flex-row">
                       <div className="space-y-1">
                         <h2 className="font-semibold text-lg">
                           {selectedFile.title ?? selectedFile.name}
@@ -239,7 +239,7 @@ export function SidebarEditorView({
                       />
                     </Field>
 
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-3 lg:grid-cols-2">
                       <StatCard
                         label="Documents"
                         value={formatNumber(selectedFileSummary.documents.length)}
@@ -264,10 +264,10 @@ export function SidebarEditorView({
               </ScrollArea>
 
               {selectedRun || onDeleteFile ? (
-                <div className="border-t border-border/70 px-5 py-4">
+                <div className="border-t border-border/70 px-4 py-4 lg:px-5">
                   <div className="space-y-2">
                     {selectedRun ? (
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                         <Button
                           variant="outline"
                           onClick={() => onDownloadModel?.()}
@@ -308,14 +308,14 @@ export function SidebarEditorView({
             <div className="flex h-full min-h-0 flex-col">
               <ScrollArea className="flex-1" scrollFade scrollbarGutter>
                 {showControls ? (
-                  <div className="space-y-4 px-5 py-5">
+                  <div className="space-y-4 px-4 py-4 lg:px-5 lg:py-5">
                     <div className="space-y-1">
                       <h2 className="font-semibold text-lg">Training Controls</h2>
                       <p className="text-sm text-muted-foreground">
                         Adjust the browser training settings for this dataset.
                       </p>
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-3 lg:grid-cols-2">
                       {trainingControlFields.map((field) =>
                         field.kind === "select" ? (
                           <LabeledSelect
@@ -354,7 +354,7 @@ export function SidebarEditorView({
                 )}
               </ScrollArea>
 
-              <div className="border-t border-border/70 px-5 py-4">
+              <div className="border-t border-border/70 px-4 py-4 lg:px-5">
                 <div className="flex items-stretch gap-2">
                   <Button
                     onClick={() => {
@@ -380,6 +380,7 @@ export function SidebarEditorView({
                     )}
                   </Button>
                   <Toggle
+                    className="shrink-0"
                     variant="outline"
                     pressed={showControls}
                     onPressedChange={setShowControls}
@@ -395,7 +396,7 @@ export function SidebarEditorView({
 
           <TabsPanel value="source" keepMounted className="min-h-0 p-0">
             <div className="flex h-full min-h-0 flex-col">
-              <div className="border-border/70 border-b px-5 py-5">
+              <div className="border-border/70 border-b px-4 py-4 lg:px-5 lg:py-5">
                 <div className="min-w-0 space-y-1">
                   <h2 className="font-semibold text-lg">Source Text</h2>
                   <p className="text-sm text-muted-foreground">
@@ -423,12 +424,12 @@ export function SidebarEditorView({
                 />
               </Suspense>
 
-              <div className="border-t border-border/70 px-5 py-4">
-                <div className="flex items-stretch gap-2">
+              <div className="border-t border-border/70 px-4 py-4 lg:px-5">
+                <div className="flex flex-col items-stretch gap-2 lg:flex-row">
                   <Button
                     variant="outline"
                     disabled={!isDirty || isTraining}
-                    className="min-w-0 flex-1 gap-2"
+                    className="min-w-0 w-full gap-2 lg:flex-1"
                     onClick={() => onDraftContentChange(savedContent)}
                   >
                     <RotateCcw />
@@ -436,7 +437,7 @@ export function SidebarEditorView({
                   </Button>
                   <Button
                     disabled={!isDirty || isTraining}
-                    className="min-w-0 flex-1 gap-2"
+                    className="min-w-0 w-full gap-2 lg:flex-1"
                     onClick={handleSaveContent}
                   >
                     <Save />

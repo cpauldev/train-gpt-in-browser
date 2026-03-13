@@ -157,7 +157,7 @@ export function TrainingLiveStats({
           </ProgressTrack>
         </Progress>
 
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2 lg:grid-cols-2">
           {statCards.map((card) => (
             <StatCard key={card.label} label={card.label} value={card.value} />
           ))}

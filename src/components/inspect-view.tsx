@@ -61,7 +61,7 @@ export function InspectView({ run }: { run: TrainingRunRecord }) {
 
       <section className="space-y-3">
         <h2 className="font-semibold text-lg">Model</h2>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2 lg:grid-cols-2">
           {modelStats.map((stat) => (
             <StatCard
               key={stat.label}
@@ -218,7 +218,7 @@ function InspectTable({
       {rows.map((row) => (
         <div
           key={row.label}
-          className="grid items-center gap-2 px-4 py-2.5 sm:grid-cols-[10rem_minmax(0,1fr)]"
+          className="grid items-center gap-2 px-4 py-2.5 lg:grid-cols-[10rem_minmax(0,1fr)]"
         >
           <dt className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
             {row.label}
