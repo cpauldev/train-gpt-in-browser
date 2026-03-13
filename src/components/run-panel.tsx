@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip";
 import { clampTemperature } from "@/lib/trainer-core";
+import { getWorkspaceRuntimeStatus } from "@/lib/trainer-presentation";
 import type { GenerationConfig, RunPanelTab, TrainingRunRecord } from "@/lib/trainer-types";
 import { cn } from "@/lib/utils";
 
@@ -67,9 +68,10 @@ export function RunPanel({
     if (!activeRun) setHeroKey((k) => k + 1);
   }, [activeRun]);
 
-  const runtimeStatus = getRuntimeStatus(isHydrating, workerReady);
+  const runtimeStatus = getWorkspaceRuntimeStatus(isHydrating, workerReady);
 
   const isTraining = activeRun?.status === "training";
+  const hasReadyCheckpoint = Boolean(activeRun?.checkpoint || activeRun?.checkpointSavedAt);
   const panelTitle = displayTitle || activeRun?.name;
 
   return (
@@ -78,63 +80,71 @@ export function RunPanel({
           animated text block is re-keyed to replay its enter animation. */}
       <div className={cn("absolute inset-0", activeRun && "invisible pointer-events-none")}>
         <Frame className="h-full overflow-hidden xl:min-h-0">
-          <FramePanel
-            className="flex flex-1 flex-col overflow-hidden p-0 xl:min-h-0"
-            style={{
-              backgroundImage: `url(${glowBg})`,
-              backgroundSize: "cover",
-              backgroundPosition: "center",
-            }}
-          >
-            <div
-              className="flex flex-1 flex-col items-start justify-end p-6"
-              style={{
-                background:
-                  "linear-gradient(to top, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.3) 40%, transparent 65%)",
-              }}
-            >
-              <div key={heroKey} className="space-y-5">
+          <FramePanel className="flex flex-1 flex-col overflow-hidden p-0 xl:min-h-0">
+            <div className="relative flex min-h-0 flex-1 overflow-hidden">
+              <div className="pointer-events-none absolute inset-0 overflow-hidden">
                 <div
-                  className="space-y-2"
-                  style={{ animation: "fade-blur-up 0.6s ease-out both", animationDelay: "600ms" }}
-                >
-                  <Brain className="size-16 text-white" />
-                  <FrameTitle className="text-2xl font-semibold text-white">
-                    Train GPT in Browser
-                  </FrameTitle>
-                </div>
-                <p
-                  className="text-sm leading-6 text-white/80"
-                  style={{ animation: "fade-blur-up 0.6s ease-out both", animationDelay: "720ms" }}
-                >
-                  Train a small GPT model directly in your browser — no server required. Built-in
-                  datasets copy to local storage, edits stay local, and runs resume from browser
-                  checkpoints. Export trained models as <code className="font-mono">.model</code>{" "}
-                  files on demand.
-                </p>
-                <p
-                  className="text-sm leading-6 text-white/80"
-                  style={{ animation: "fade-blur-up 0.6s ease-out both", animationDelay: "840ms" }}
-                >
-                  Choose a dataset on the left, then start training to see results here.
-                </p>
-                <p
-                  className="text-xs text-white/60"
-                  style={{ animation: "fade-blur-up 0.6s ease-out both", animationDelay: "960ms" }}
-                >
-                  Research and implementation by Christian Paul{" "}
-                  <a
-                    href="https://github.com/cpauldev"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline underline-offset-2 hover:text-white/80"
+                  className="absolute inset-0 scale-[1.02]"
+                  style={{
+                    backgroundImage: `url(${glowBg})`,
+                    backgroundPosition: "center",
+                    backgroundSize: "cover",
+                  }}
+                />
+              </div>
+              <div
+                className="relative z-10 flex flex-1 flex-col items-start justify-end p-6"
+                style={{
+                  background:
+                    "linear-gradient(to top, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.3) 40%, transparent 65%)",
+                }}
+              >
+                <div key={heroKey} className="space-y-5">
+                  <div
+                    className="space-y-2"
+                    style={{
+                      animation: "fade-blur-up 0.6s ease-out both",
+                      animationDelay: "600ms",
+                    }}
                   >
-                    @cpauldev
-                  </a>
-                </p>
+                    <Brain className="size-16 text-white" />
+                    <FrameTitle className="text-2xl font-semibold text-white">
+                      Train GPT in Browser
+                    </FrameTitle>
+                  </div>
+                  <p
+                    className="text-sm leading-6 text-white/80"
+                    style={{
+                      animation: "fade-blur-up 0.6s ease-out both",
+                      animationDelay: "720ms",
+                    }}
+                  >
+                    Train a small character-level GPT directly in your browser. No server required.
+                    It learns character patterns from newline-delimited text, resumes from browser
+                    checkpoints, and exports <code className="font-mono">.model</code> files on
+                    demand.
+                  </p>
+                  <p
+                    className="text-xs text-white/60"
+                    style={{
+                      animation: "fade-blur-up 0.6s ease-out both",
+                      animationDelay: "840ms",
+                    }}
+                  >
+                    Research and implementation by Christian Paul{" "}
+                    <a
+                      href="https://github.com/cpauldev"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline underline-offset-2 hover:text-white/80"
+                    >
+                      @cpauldev
+                    </a>
+                  </p>
+                </div>
               </div>
             </div>
-            <div className="border-t border-border bg-white px-5 py-4">
+            <div className="relative z-10 border-t border-border bg-background px-5 py-4">
               <div className="flex items-stretch">
                 <Tooltip>
                   <TooltipTrigger
@@ -147,8 +157,8 @@ export function RunPanel({
                   />
                   <TooltipPopup>
                     <div className="space-y-1.5">
-                      <p>Worker: {workerReady ? "Ready" : "Starting"}</p>
-                      <p>Local data: {isHydrating ? "Loading" : "Ready"}</p>
+                      <p>Worker: {runtimeStatus.workerLabel}</p>
+                      <p>Local data: {runtimeStatus.storageLabel}</p>
                     </div>
                   </TooltipPopup>
                 </Tooltip>
@@ -266,7 +276,7 @@ export function RunPanel({
 
               <Button
                 onClick={onGenerate}
-                disabled={!activeRun.checkpoint || isGenerating || isTraining}
+                disabled={!hasReadyCheckpoint || isGenerating || isTraining}
                 size="xl"
                 className="w-full"
               >
@@ -480,14 +490,4 @@ function buildTemperatureTicks() {
 
 function normalizeLikeValue(value: string) {
   return value.trim();
-}
-
-function getRuntimeStatus(hydrating: boolean, workerReady: boolean) {
-  if (workerReady && !hydrating) {
-    return { dotClass: "bg-green-500", label: "Runtime ready" };
-  }
-  if (workerReady) {
-    return { dotClass: "bg-blue-500", label: "Loading data" };
-  }
-  return { dotClass: "bg-yellow-500", label: "Starting runtime" };
 }

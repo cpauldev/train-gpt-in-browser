@@ -59,6 +59,7 @@ type ModelState = {
 export type TrainingStepSummary = {
   checkpoint?: SerializedCheckpoint;
   completedSteps: number;
+  elapsedSeconds: number;
   generatedResults?: string[];
   logEntry: LogEntry;
   loss: number;
@@ -127,6 +128,7 @@ export class BrowserTrainer {
       resolvedBackend,
       resumeState: {
         completedSteps: 0,
+        elapsedTrainingSeconds: 0,
         finalLoss: Number.NaN,
         lastSavedAt: Date.now(),
         totalTokens: 0,
@@ -162,7 +164,10 @@ export class BrowserTrainer {
       model,
       optimizerStep: checkpoint.optimizerState.step,
       resolvedBackend,
-      resumeState: checkpoint.resumeState,
+      resumeState: {
+        ...checkpoint.resumeState,
+        elapsedTrainingSeconds: checkpoint.resumeState.elapsedTrainingSeconds ?? 0,
+      },
       rngState: checkpoint.rngState,
       sourceFile: {
         content: "",
@@ -180,9 +185,11 @@ export class BrowserTrainer {
     completedSteps: number,
     totalTokens: number,
     finalLoss: number,
+    elapsedTrainingSeconds: number,
   ): Promise<SerializedCheckpoint> {
     this.resumeState = {
       completedSteps,
+      elapsedTrainingSeconds,
       finalLoss,
       lastSavedAt: Date.now(),
       totalTokens,
@@ -246,7 +253,8 @@ export class BrowserTrainer {
     const parameterCount = countParameters(this.model.ordered);
     const completedStepsBefore = this.resumeState.completedSteps;
     const totalTokensBefore = this.resumeState.totalTokens;
-    const targetTotalSteps = completedStepsBefore + this.trainingConfig.steps;
+    const targetTotalSteps = Math.max(this.trainingConfig.steps, completedStepsBefore);
+    const remainingTrainingSteps = Math.max(0, targetTotalSteps - completedStepsBefore);
     const startingLogEntries = buildTrainingStartLogs({
       dataset: this.dataset,
       fileName: this.sourceFile.name,
@@ -265,12 +273,13 @@ export class BrowserTrainer {
     let completedSteps = completedStepsBefore;
     let totalTokens = totalTokensBefore;
     let finalLoss = this.resumeState.finalLoss;
+    const elapsedTrainingSecondsBefore = this.resumeState.elapsedTrainingSeconds ?? 0;
     const startedAt = performance.now();
     let lastTelemetryAt = startedAt;
     let lastTelemetrySteps = completedStepsBefore;
     let lastTelemetryTokens = totalTokensBefore;
 
-    for (let step = 0; step < this.trainingConfig.steps; step += 1) {
+    for (let step = 0; step < remainingTrainingSteps; step += 1) {
       const learningRate =
         this.trainingConfig.learningRate *
         (1 - (completedStepsBefore + step) / Math.max(1, targetTotalSteps));
@@ -291,9 +300,11 @@ export class BrowserTrainer {
       totalTokens += this.trainingConfig.batchSize * this.trainingConfig.model.blockSize;
       const now = performance.now();
 
-      if (onTelemetry && (now - lastTelemetryAt >= 250 || step + 1 === this.trainingConfig.steps)) {
+      if (onTelemetry && (now - lastTelemetryAt >= 250 || step + 1 === remainingTrainingSteps)) {
         const elapsedSeconds = Math.max((now - lastTelemetryAt) / 1000, 1e-9);
+        const sessionElapsedSeconds = Math.max((now - startedAt) / 1000, 1e-9);
         const telemetryPoint: TrainingTelemetryPoint = {
+          elapsedTimeSeconds: elapsedTrainingSecondsBefore + sessionElapsedSeconds,
           loss: finalLoss,
           step: completedSteps,
           stepsPerSecond: (completedSteps - lastTelemetrySteps) / elapsedSeconds,
@@ -309,7 +320,7 @@ export class BrowserTrainer {
       }
 
       const shouldReport =
-        (step + 1) % this.trainingConfig.printEvery === 0 || step + 1 === this.trainingConfig.steps;
+        (step + 1) % this.trainingConfig.printEvery === 0 || step + 1 === remainingTrainingSteps;
       const shouldAutosave =
         completedSteps % Math.max(this.trainingConfig.printEvery, AUTOSAVE_STEP_INTERVAL) === 0 ||
         completedSteps === targetTotalSteps;
@@ -318,6 +329,7 @@ export class BrowserTrainer {
         const elapsedSeconds = Math.max((now - startedAt) / 1000, 1e-9);
         const tokPerSecond = (totalTokens - totalTokensBefore) / elapsedSeconds;
         const stepsPerSecond = (step + 1) / elapsedSeconds;
+        const totalElapsedTrainingSeconds = elapsedTrainingSecondsBefore + elapsedSeconds;
         const logEntry = createLogEntry(
           [
             `step ${String(completedSteps).padStart(String(targetTotalSteps).length, " ")}/${targetTotalSteps}`,
@@ -328,9 +340,15 @@ export class BrowserTrainer {
         );
         const summary: TrainingStepSummary = {
           checkpoint: shouldAutosave
-            ? await this.getCheckpoint(completedSteps, totalTokens, finalLoss)
+            ? await this.getCheckpoint(
+                completedSteps,
+                totalTokens,
+                finalLoss,
+                totalElapsedTrainingSeconds,
+              )
             : undefined,
           completedSteps,
+          elapsedSeconds,
           logEntry,
           loss: finalLoss,
           stepsPerSecond,
@@ -342,9 +360,15 @@ export class BrowserTrainer {
       }
     }
 
-    const checkpoint = await this.getCheckpoint(completedSteps, totalTokens, finalLoss);
-    const generatedResults = await this.generateSamples(generationConfig);
     const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 1e-9);
+    const totalElapsedTrainingSeconds = elapsedTrainingSecondsBefore + elapsedSeconds;
+    const checkpoint = await this.getCheckpoint(
+      completedSteps,
+      totalTokens,
+      finalLoss,
+      totalElapsedTrainingSeconds,
+    );
+    const generatedResults = await this.generateSamples(generationConfig);
     const completionEntry = createLogEntry(
       `Training finished in ${elapsedSeconds.toFixed(1)} seconds on ${this.resolvedBackend}.`,
       "success",
@@ -354,10 +378,11 @@ export class BrowserTrainer {
       {
         checkpoint,
         completedSteps,
+        elapsedSeconds,
         generatedResults,
         logEntry: completionEntry,
         loss: finalLoss,
-        stepsPerSecond: this.trainingConfig.steps / elapsedSeconds,
+        stepsPerSecond: remainingTrainingSteps / elapsedSeconds,
         tokPerSecond: (totalTokens - totalTokensBefore) / elapsedSeconds,
         totalSteps: targetTotalSteps,
         totalTokens,

@@ -1,4 +1,6 @@
 const CACHE_NAME = "dreamphrasegpt-browser-v1";
+const CACHE_URLS_MESSAGE_TYPE = "CACHE_URLS";
+const NAVIGATION_FALLBACKS = ["./index.html", "./"];
 const PRECACHE_URLS = [
   "./",
   "./index.html",
@@ -10,27 +12,15 @@ const PRECACHE_URLS = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
-      .then(() => self.skipWaiting()),
-  );
+  event.waitUntil(precacheAppShell());
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))),
-      )
-      .then(() => self.clients.claim()),
-  );
+  event.waitUntil(activateServiceWorker());
 });
 
 self.addEventListener("message", (event) => {
-  if (event.data?.type !== "CACHE_URLS" || !Array.isArray(event.data.urls)) {
+  if (event.data?.type !== CACHE_URLS_MESSAGE_TYPE || !Array.isArray(event.data.urls)) {
     return;
   }
 
@@ -38,10 +28,10 @@ self.addEventListener("message", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  const request = event.request;
+  const { request } = event;
   const requestUrl = new URL(request.url);
 
-  if (request.method !== "GET" || requestUrl.origin !== self.location.origin) {
+  if (!isCacheableRequest(request, requestUrl)) {
     return;
   }
 
@@ -53,19 +43,27 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(handleAssetRequest(request));
 });
 
+async function precacheAppShell() {
+  const cache = await openAppCache();
+  await cache.addAll(PRECACHE_URLS);
+  await self.skipWaiting();
+}
+
+async function activateServiceWorker() {
+  const cacheKeys = await caches.keys();
+  await Promise.all(
+    cacheKeys.filter((cacheKey) => cacheKey !== CACHE_NAME).map((cacheKey) => caches.delete(cacheKey)),
+  );
+  await self.clients.claim();
+}
+
 async function handleNavigationRequest(request) {
   try {
     const response = await fetch(request);
-    const cache = await caches.open(CACHE_NAME);
-    await cache.put(request, response.clone());
+    await cacheResponse(request, response);
     return response;
   } catch {
-    const cachedResponse = await caches.match(request);
-    if (cachedResponse) {
-      return cachedResponse;
-    }
-
-    return (await caches.match("./index.html")) ?? (await caches.match("./")) ?? Response.error();
+    return (await matchCachedRequest([request, ...NAVIGATION_FALLBACKS])) ?? Response.error();
   }
 }
 
@@ -78,10 +76,7 @@ async function handleAssetRequest(request) {
 
   try {
     const response = await fetch(request);
-    if (shouldCacheResponse(response)) {
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(request, response.clone());
-    }
+    await cacheResponse(request, response);
     return response;
   } catch {
     return cachedResponse ?? Response.error();
@@ -91,28 +86,21 @@ async function handleAssetRequest(request) {
 async function refreshCachedRequest(request) {
   try {
     const response = await fetch(request);
-    if (!shouldCacheResponse(response)) {
-      return;
-    }
-
-    const cache = await caches.open(CACHE_NAME);
-    await cache.put(request, response.clone());
+    await cacheResponse(request, response);
   } catch {
     // Keep the cached response when offline.
   }
 }
 
-function shouldCacheResponse(response) {
-  return response.ok && response.type !== "opaque";
-}
-
 async function warmCache(urls) {
-  const cache = await caches.open(CACHE_NAME);
+  const cache = await openAppCache();
+  const uniqueUrls = [...new Set(urls)];
 
-  for (const url of urls) {
+  for (const url of uniqueUrls) {
     try {
       const request = new Request(url, { credentials: "same-origin" });
       const response = await fetch(request);
+
       if (shouldCacheResponse(response)) {
         await cache.put(request, response.clone());
       }
@@ -120,4 +108,36 @@ async function warmCache(urls) {
       // Ignore warm-cache failures.
     }
   }
+}
+
+async function cacheResponse(request, response) {
+  if (!shouldCacheResponse(response)) {
+    return;
+  }
+
+  const cache = await openAppCache();
+  await cache.put(request, response.clone());
+}
+
+async function matchCachedRequest(candidates) {
+  for (const candidate of candidates) {
+    const response = await caches.match(candidate);
+    if (response) {
+      return response;
+    }
+  }
+
+  return null;
+}
+
+function isCacheableRequest(request, requestUrl) {
+  return request.method === "GET" && requestUrl.origin === self.location.origin;
+}
+
+function shouldCacheResponse(response) {
+  return response.ok && response.type !== "opaque";
+}
+
+function openAppCache() {
+  return caches.open(CACHE_NAME);
 }

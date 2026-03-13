@@ -150,10 +150,10 @@ describe("SidebarEditorView", () => {
     fireEvent.click(screen.getByRole("button", { name: /download model/i }));
     fireEvent.click(screen.getByRole("button", { name: /delete model/i }));
     await user.click(screen.getByRole("tab", { name: /source/i }));
-    expect(screen.getByRole("textbox", { name: /source text/i })).toBeTruthy();
+    expect(await screen.findByRole("textbox", { name: /source text/i })).toBeTruthy();
     await user.click(screen.getByRole("tab", { name: /training/i }));
-    expect(screen.getByText(/live stats/i)).toBeTruthy();
-    expect(screen.getByTestId("liveline")).toBeTruthy();
+    expect(await screen.findByText(/live stats/i)).toBeTruthy();
+    expect(await screen.findByTestId("liveline")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /continue training/i }));
     fireEvent.click(screen.getByRole("tab", { name: /overview/i }));
     fireEvent.click(screen.getByRole("button", { name: /delete file/i }));
@@ -272,8 +272,56 @@ describe("SidebarEditorView", () => {
       />,
     );
 
-    expect(screen.getByText(/live stats/i)).toBeTruthy();
-    expect(screen.getByText(/^progress$/i)).toBeTruthy();
-    expect(screen.getByText(/1 \/ 100/i)).toBeTruthy();
+    expect(await screen.findByText(/live stats/i)).toBeTruthy();
+    expect(await screen.findByText(/^progress$/i)).toBeTruthy();
+    expect(await screen.findByText(/1 \/ 100/i)).toBeTruthy();
+  });
+
+  it("shows a finalizing label once telemetry reaches 100 percent", () => {
+    const finalizingRun: TrainingRunRecord = {
+      ...createRun(),
+      status: "training",
+      telemetry: [
+        {
+          loss: 1.2345,
+          step: 100,
+          stepsPerSecond: 2.5,
+          time: Date.now() / 1000,
+          tokPerSecond: 128,
+          totalSteps: 100,
+          totalTokens: 1600,
+        },
+      ],
+    };
+
+    render(
+      <SidebarEditorView
+        canTrain
+        draftContent={selectedFile.content}
+        draftName={selectedFile.name}
+        generationConfig={DEFAULT_GENERATION_CONFIG}
+        isTraining
+        onBack={vi.fn()}
+        onResetLocalData={vi.fn()}
+        onDraftContentChange={vi.fn()}
+        onDraftNameChange={vi.fn()}
+        onGenerationConfigChange={vi.fn()}
+        onResumeTraining={vi.fn()}
+        onStartTraining={vi.fn().mockResolvedValue(undefined)}
+        onTrainingConfigChange={vi.fn()}
+        selectedFile={selectedFile}
+        selectedFileSummary={{
+          characterCount: 9,
+          documents: ["alpha", "beta"],
+          lineCount: 2,
+          tokenCount: 11,
+          vocabSize: 8,
+        }}
+        selectedRun={finalizingRun}
+        trainingConfig={DEFAULT_TRAINING_CONFIG}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /finalizing results/i })).toBeTruthy();
   });
 });

@@ -1,5 +1,4 @@
 import { type DBSchema, type IDBPDatabase, openDB } from "idb";
-import { listRunArtifactFiles, parseDreamPhraseArtifactSet } from "@/lib/dreamphrase-artifacts";
 import { createId } from "@/lib/trainer-core";
 import {
   ACTIVE_FILE_STORAGE_KEY,
@@ -219,20 +218,33 @@ export async function saveTrainingRun(
   },
 ) {
   const db = await getTrainerDb();
+  const shouldPersistCheckpoint = Boolean((options?.persistCheckpoint ?? true) && run.checkpoint);
+
+  if (!shouldPersistCheckpoint) {
+    await db.put("runs", stripCheckpoint(run));
+    return run;
+  }
+
   const transaction = db.transaction(["checkpoints", "runs"], "readwrite");
   await transaction.objectStore("runs").put(stripCheckpoint(run));
 
-  if ((options?.persistCheckpoint ?? true) && run.checkpoint) {
-    await transaction.objectStore("checkpoints").put({
-      checkpoint: cloneCheckpoint(run.checkpoint),
-      id: run.id,
-      storage: "indexeddb",
-      updatedAt: Date.now(),
-    } satisfies StoredTrainingCheckpoint);
+  if (run.checkpoint) {
+    await transaction
+      .objectStore("checkpoints")
+      .put(createStoredTrainingCheckpoint(run.id, run.checkpoint));
   }
 
   await transaction.done;
   return run;
+}
+
+export async function saveTrainingCheckpoint(
+  runId: string,
+  checkpoint: NonNullable<TrainingRunRecord["checkpoint"]>,
+) {
+  const db = await getTrainerDb();
+  await db.put("checkpoints", createStoredTrainingCheckpoint(runId, checkpoint));
+  return checkpoint;
 }
 
 export async function saveTrainingRunArtifacts(
@@ -373,6 +385,7 @@ async function inflatePersistedRun(
     } satisfies TrainingRunRecord;
   }
 
+  const { parseDreamPhraseArtifactSet } = await import("@/lib/dreamphrase-artifacts");
   const checkpoint = parseDreamPhraseArtifactSet({
     modelArtifact: legacyArtifactSet.modelState.value,
     resumeArtifact: legacyArtifactSet.resumeState.value,
@@ -460,7 +473,7 @@ async function deleteLegacyArtifactRecords(db: IDBPDatabase<TrainerDbSchema>, ru
 }
 
 function artifactSetToList(artifactSet: RunArtifactSet) {
-  return listRunArtifactFiles(artifactSet);
+  return [artifactSet.model];
 }
 
 async function updateStoredWorkspaceFile(
@@ -661,6 +674,18 @@ function cloneArtifactFile(artifact: RunArtifactFile | StoredRunArtifact) {
 function stripCheckpoint(run: TrainingRunRecord): PersistedTrainingRunRecord {
   const { checkpoint: _checkpoint, ...persistedRun } = run;
   return persistedRun;
+}
+
+function createStoredTrainingCheckpoint(
+  runId: string,
+  checkpoint: NonNullable<TrainingRunRecord["checkpoint"]>,
+): StoredTrainingCheckpoint {
+  return {
+    checkpoint,
+    id: runId,
+    storage: "indexeddb",
+    updatedAt: Date.now(),
+  };
 }
 
 function hydratePersistedRunShape(run: PersistedTrainingRunRecord) {

@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip";
+import { getWorkspaceRuntimeStatus } from "@/lib/trainer-presentation";
 import { cn } from "@/lib/utils";
 
 export function WorkspaceStatusBadges({
@@ -11,44 +12,23 @@ export function WorkspaceStatusBadges({
   hydrating: boolean;
   workerReady: boolean;
 }) {
-  const status = getWorkspaceStatus(hydrating, workerReady);
+  const status = getWorkspaceRuntimeStatus(hydrating, workerReady);
 
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <Badge variant={status.variant} className={cn("w-fit", className)}>
+          <Badge variant={status.badgeVariant} className={cn("w-fit", className)}>
             {status.label}
           </Badge>
         }
       />
       <TooltipPopup align="end">
         <div className="space-y-1.5">
-          <p>Worker: {workerReady ? "Ready" : "Starting"}</p>
-          <p>Local data: {hydrating ? "Loading" : "Ready"}</p>
+          <p>Worker: {status.workerLabel}</p>
+          <p>Local data: {status.storageLabel}</p>
         </div>
       </TooltipPopup>
     </Tooltip>
   );
-}
-
-function getWorkspaceStatus(hydrating: boolean, workerReady: boolean) {
-  if (workerReady && !hydrating) {
-    return {
-      label: "Local runtime ready",
-      variant: "success" as const,
-    };
-  }
-
-  if (workerReady) {
-    return {
-      label: "Loading local data",
-      variant: "info" as const,
-    };
-  }
-
-  return {
-    label: "Preparing local runtime",
-    variant: "warning" as const,
-  };
 }

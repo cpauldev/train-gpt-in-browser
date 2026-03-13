@@ -1,11 +1,14 @@
 /// <reference lib="webworker" />
 
 import { createLogEntry } from "@/lib/trainer-core";
-import { BrowserTrainer } from "@/lib/trainer-runtime";
 import type { GenerationConfig, TrainerCommand, TrainerEvent } from "@/lib/trainer-types";
+
+type BrowserTrainer = import("@/lib/trainer-runtime").BrowserTrainer;
 
 let activeRunId: string | null = null;
 let activeTrainer: BrowserTrainer | null = null;
+let trainerRuntimePromise: Promise<typeof import("@/lib/trainer-runtime")> | null = null;
+let trainerStoragePromise: Promise<typeof import("@/lib/trainer-storage")> | null = null;
 
 self.addEventListener("message", async (event: MessageEvent<TrainerCommand>) => {
   try {
@@ -26,24 +29,21 @@ async function handleCommand(command: TrainerCommand) {
     case "startTraining": {
       disposeActiveTrainer();
       activeRunId = command.runId;
-      activeTrainer = await BrowserTrainer.createNew(command.file, command.trainingConfig);
+      activeTrainer = await createNewTrainer(command.file, command.trainingConfig);
       await startTraining(activeTrainer, command.runId, command.generationConfig);
       return;
     }
     case "resumeTraining": {
       disposeActiveTrainer();
       activeRunId = command.runId;
-      activeTrainer = await BrowserTrainer.fromCheckpoint(
-        command.checkpoint,
-        command.trainingConfig,
-      );
+      activeTrainer = await createTrainerFromCheckpoint(command.checkpoint, command.trainingConfig);
       await startTraining(activeTrainer, command.runId, command.generationConfig);
       return;
     }
     case "loadRun": {
       disposeActiveTrainer();
       activeRunId = command.runId;
-      activeTrainer = await BrowserTrainer.fromCheckpoint(command.checkpoint);
+      activeTrainer = await createTrainerFromCheckpoint(command.checkpoint);
       return;
     }
     case "generateSamples": {
@@ -101,8 +101,12 @@ async function startTraining(
         if (!summary.checkpoint) {
           throw new Error("Training completed without a checkpoint payload.");
         }
+
+        await persistTrainingCheckpoint(runId, summary.checkpoint);
         postMessageSafe({
-          checkpoint: summary.checkpoint,
+          checkpointSavedAt: summary.checkpoint.exportedAt,
+          datasetStats: summary.checkpoint.datasetStats,
+          elapsedSeconds: summary.elapsedSeconds,
           generatedResults: summary.generatedResults,
           runId,
           temperatureKey: generationConfig.temperature.toFixed(1),
@@ -126,8 +130,11 @@ async function startTraining(
         if (!summary.checkpoint) {
           throw new Error("Autosave was requested without a checkpoint payload.");
         }
+
+        await persistTrainingCheckpoint(runId, summary.checkpoint);
         postMessageSafe({
-          checkpoint: summary.checkpoint,
+          checkpointSavedAt: summary.checkpoint.exportedAt,
+          datasetStats: summary.checkpoint.datasetStats,
           runId,
           type: "trainingCheckpoint",
         });
@@ -162,7 +169,7 @@ async function ensureActiveTrainer(
 
   disposeActiveTrainer();
   activeRunId = runId;
-  activeTrainer = await BrowserTrainer.fromCheckpoint(checkpoint);
+  activeTrainer = await createTrainerFromCheckpoint(checkpoint);
   return activeTrainer;
 }
 
@@ -177,34 +184,45 @@ function getRunId(command: TrainerCommand) {
 }
 
 function postMessageSafe(event: TrainerEvent) {
-  const transfer = getEventTransferables(event);
-  if (transfer.length > 0) {
-    self.postMessage(event, transfer);
-    return;
-  }
-
   self.postMessage(event);
 }
 
-function getEventTransferables(event: TrainerEvent) {
-  switch (event.type) {
-    case "trainingCheckpoint":
-      return collectCheckpointTransferables(event.checkpoint);
-    case "trainingCompleted":
-      return collectCheckpointTransferables(event.checkpoint);
-    default:
-      return [];
+async function loadTrainerRuntime() {
+  if (!trainerRuntimePromise) {
+    trainerRuntimePromise = import("@/lib/trainer-runtime");
   }
+
+  return trainerRuntimePromise;
 }
 
-function collectCheckpointTransferables(
-  checkpoint: Extract<TrainerEvent, { checkpoint: unknown }>["checkpoint"],
+async function loadTrainerStorage() {
+  if (!trainerStoragePromise) {
+    trainerStoragePromise = import("@/lib/trainer-storage");
+  }
+
+  return trainerStoragePromise;
+}
+
+async function createNewTrainer(
+  file: Extract<TrainerCommand, { file: unknown }>["file"],
+  trainingConfig: Extract<TrainerCommand, { trainingConfig: unknown }>["trainingConfig"],
 ) {
-  return [
-    checkpoint.datasetData.buffer,
-    checkpoint.sourceFilter.bits.buffer,
-    ...checkpoint.weights.map((tensor) => tensor.values.buffer),
-    ...checkpoint.optimizerState.firstMoments.map((tensor) => tensor.values.buffer),
-    ...checkpoint.optimizerState.secondMoments.map((tensor) => tensor.values.buffer),
-  ];
+  const { BrowserTrainer } = await loadTrainerRuntime();
+  return BrowserTrainer.createNew(file, trainingConfig);
+}
+
+async function createTrainerFromCheckpoint(
+  checkpoint: Extract<TrainerCommand, { checkpoint: unknown }>["checkpoint"],
+  trainingConfig?: Extract<TrainerCommand, { trainingConfig: unknown }>["trainingConfig"],
+) {
+  const { BrowserTrainer } = await loadTrainerRuntime();
+  return BrowserTrainer.fromCheckpoint(checkpoint, trainingConfig);
+}
+
+async function persistTrainingCheckpoint(
+  runId: string,
+  checkpoint: Extract<TrainerCommand, { checkpoint: unknown }>["checkpoint"],
+) {
+  const { saveTrainingCheckpoint } = await loadTrainerStorage();
+  await saveTrainingCheckpoint(runId, checkpoint);
 }

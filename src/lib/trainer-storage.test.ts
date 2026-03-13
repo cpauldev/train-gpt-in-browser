@@ -10,6 +10,7 @@ import {
   listTrainingRuns,
   listWorkspaceFiles,
   resetTrainerStorage,
+  saveTrainingCheckpoint,
   saveTrainingRun,
   saveTrainingRunArtifacts,
   seedBuiltinWorkspaceFiles,
@@ -140,5 +141,34 @@ describe("trainer-storage", () => {
       checkpoint.resumeState.completedSteps,
     );
     expect(modelArtifact?.fileName).toBe("fixture-run.model");
+  });
+
+  it("hydrates a separately persisted checkpoint onto an existing run", async () => {
+    const checkpoint = createCheckpointFixture();
+    const run: TrainingRunRecord = {
+      createdAt: 1,
+      datasetStats: checkpoint.datasetStats,
+      fileId: checkpoint.fileId,
+      fileName: checkpoint.fileName,
+      generatedResults: {},
+      id: "run-separate-checkpoint",
+      likes: [],
+      logs: [],
+      name: "fixture-run",
+      status: "training",
+      telemetry: [],
+      trainingConfig: checkpoint.trainingConfig,
+      updatedAt: 2,
+    };
+
+    await saveTrainingRun(run, { persistCheckpoint: false });
+    await saveTrainingCheckpoint(run.id, checkpoint);
+
+    const [restoredRun] = await listTrainingRuns();
+
+    expect(restoredRun?.checkpoint?.fileName).toBe(checkpoint.fileName);
+    expect(restoredRun?.checkpoint?.resumeState.completedSteps).toBe(
+      checkpoint.resumeState.completedSteps,
+    );
   });
 });

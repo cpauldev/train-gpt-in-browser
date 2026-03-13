@@ -4,6 +4,7 @@ import App from "./App";
 import { AnchoredToastProvider, ToastProvider } from "./components/ui/toast";
 import "./index.css";
 import glowBg from "@/assets/glow.jpg";
+import { initializeAppTheme, ThemeProvider } from "./lib/app-theme";
 import { registerServiceWorker } from "./lib/service-worker";
 
 // Inject a high-priority preload link so the browser fetches the panel bg
@@ -14,8 +15,7 @@ preloadLink.as = "image";
 preloadLink.href = glowBg;
 document.head.appendChild(preloadLink);
 
-document.documentElement.classList.remove("dark");
-document.documentElement.style.colorScheme = "light";
+initializeAppTheme();
 
 const rootElement = document.getElementById("root");
 
@@ -28,7 +28,9 @@ registerServiceWorker();
 ReactDOM.createRoot(rootElement).render(
   <ToastProvider position="bottom-center">
     <AnchoredToastProvider>
-      <App />
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
     </AnchoredToastProvider>
   </ToastProvider>,
 );

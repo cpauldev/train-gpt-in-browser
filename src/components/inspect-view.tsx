@@ -1,8 +1,10 @@
 import { CircleHelp } from "lucide-react";
 
+import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatNumber } from "@/lib/trainer-core";
+import { formatBytes, formatTimestamp } from "@/lib/trainer-presentation";
 import type { TrainingRunRecord } from "@/lib/trainer-types";
 
 export function InspectView({ run }: { run: TrainingRunRecord }) {
@@ -61,11 +63,11 @@ export function InspectView({ run }: { run: TrainingRunRecord }) {
         <h2 className="font-semibold text-lg">Model</h2>
         <div className="grid gap-2 sm:grid-cols-2">
           {modelStats.map((stat) => (
-            <InspectStatCard
+            <StatCard
               key={stat.label}
               label={stat.label}
+              labelAccessory={stat.tooltip ? <InspectTooltip>{stat.tooltip}</InspectTooltip> : null}
               value={stat.value}
-              tooltip={stat.tooltip}
             />
           ))}
         </div>
@@ -231,26 +233,6 @@ function InspectTable({
   );
 }
 
-function InspectStatCard({
-  label,
-  tooltip,
-  value,
-}: {
-  label: string;
-  tooltip?: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-xl border border-border/70 bg-background px-4 py-3">
-      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-        {label}
-        {tooltip && <InspectTooltip>{tooltip}</InspectTooltip>}
-      </div>
-      <div className="mt-1 font-semibold text-lg">{value}</div>
-    </div>
-  );
-}
-
 function InspectTooltip({ children }: { children: string }) {
   return (
     <Tooltip>
@@ -277,18 +259,4 @@ function countParameters(checkpoint: NonNullable<TrainingRunRecord["checkpoint"]
 
 function formatArtifactValue(fileName: string, sizeBytes: number) {
   return `${fileName} (${formatBytes(sizeBytes)})`;
-}
-
-function formatBytes(value: number) {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`;
-  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`;
-  return `${(value / 1024 ** 3).toFixed(1)} GB`;
-}
-
-function formatTimestamp(value: number) {
-  return new Date(value).toLocaleString("en-US", {
-    dateStyle: "medium",
-    timeStyle: "medium",
-  });
 }

@@ -34,7 +34,7 @@ function createTestTrainingConfig(): TrainingConfig {
 }
 
 describe("trainer-runtime", () => {
-  it("creates checkpoints that resume exactly on the CPU backend", async () => {
+  it("resumes toward the original total step target instead of adding another full run", async () => {
     const trainingConfig = createTestTrainingConfig();
     const generationConfig = createGenerationConfig({
       numSamples: 0,
@@ -58,14 +58,19 @@ describe("trainer-runtime", () => {
     });
 
     expect(firstRun.checkpoint.resumeState.completedSteps).toBe(1);
+    expect(firstRun.checkpoint.resumeState.elapsedTrainingSeconds).toBeGreaterThan(0);
     expect(firstRun.checkpoint.optimizerState.step).toBe(1);
     expect(firstRun.generatedResults).toEqual([]);
 
     trainer.dispose();
 
+    const resumedTrainingConfig: TrainingConfig = {
+      ...createTestTrainingConfig(),
+      steps: 2,
+    };
     const resumedTrainer = await BrowserTrainer.fromCheckpoint(
       firstRun.checkpoint,
-      createTestTrainingConfig(),
+      resumedTrainingConfig,
     );
 
     const secondRun = await resumedTrainer.train({
@@ -75,6 +80,10 @@ describe("trainer-runtime", () => {
 
     expect(firstStepSummaries).toContain(1);
     expect(secondRun.checkpoint.resumeState.completedSteps).toBe(2);
+    expect(secondRun.checkpoint.resumeState.elapsedTrainingSeconds).toBeGreaterThan(
+      firstRun.checkpoint.resumeState.elapsedTrainingSeconds ?? 0,
+    );
+    expect(secondRun.checkpoint.trainingConfig.steps).toBe(2);
     expect(secondRun.checkpoint.resumeState.totalTokens).toBeGreaterThan(
       firstRun.checkpoint.resumeState.totalTokens,
     );

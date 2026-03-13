@@ -8,6 +8,7 @@ import {
 } from "@/lib/trainer-defaults";
 import type {
   DatasetStats,
+  DatasetTextSummary,
   LogEntry,
   LogKind,
   SourceFilterSnapshot,
@@ -113,7 +114,7 @@ export function prepareDataset(content: string, blockSize: number, rng: DreamPhr
   } satisfies PreparedDataset;
 }
 
-export function summarizeDatasetText(content: string) {
+export function summarizeDatasetText(content: string): DatasetTextSummary {
   const documents = parseDatasetDocuments(content);
   const idToChar = [...new Set(documents.join(""))].sort();
   const characterCount = documents.reduce((total, value) => total + value.length, 0);

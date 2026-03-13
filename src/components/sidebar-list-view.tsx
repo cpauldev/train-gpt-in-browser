@@ -19,6 +19,7 @@ const SELECTION_BUTTON_CLASS =
 export function SidebarListView({
   files,
   isHydrating,
+  isImporting = false,
   onCreateFile,
   onResetLocalData,
   onImportClick,
@@ -27,6 +28,7 @@ export function SidebarListView({
 }: {
   files: WorkspaceFile[];
   isHydrating: boolean;
+  isImporting?: boolean;
   onCreateFile: () => void;
   onResetLocalData: () => void;
   onImportClick: () => void;
@@ -67,19 +69,28 @@ export function SidebarListView({
 
         <div className="border-t border-border/70 px-5 py-4">
           <div className="flex items-stretch">
-            <Button onClick={onCreateFile} className="min-w-0 flex-1 gap-2">
+            <Button onClick={onCreateFile} className="min-w-0 flex-1 gap-2" disabled={isImporting}>
               <Plus className="size-4" />
               New Dataset
             </Button>
             <Tooltip>
               <TooltipTrigger
-                render={<Button variant="outline" className="ml-2 min-w-0 flex-1 gap-2" />}
+                render={
+                  <Button
+                    variant="outline"
+                    className="ml-2 min-w-0 flex-1 gap-2"
+                    aria-label={isImporting ? "Importing files" : "Upload files"}
+                    disabled={isImporting}
+                  />
+                }
                 onClick={onImportClick}
               >
                 <Upload className="size-4" />
-                Upload Dataset
+                {isImporting ? "Importing..." : "Upload Dataset"}
               </TooltipTrigger>
-              <TooltipPopup>Import .txt files</TooltipPopup>
+              <TooltipPopup>
+                {isImporting ? "Reading local files" : "Import .txt files"}
+              </TooltipPopup>
             </Tooltip>
           </div>
         </div>

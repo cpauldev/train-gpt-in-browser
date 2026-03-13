@@ -1,8 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 
+const MIN_ANIMATION_SNAP_DISTANCE = 1e-3;
+const MAX_ANIMATION_SNAP_DISTANCE = 1;
+
 function lerp(current: number, target: number, speed: number, dt: number): number {
   const factor = 1 - (1 - speed) ** (dt / 16.67);
   return current + (target - current) * factor;
+}
+
+export function getAnimationSnapDistance(target: number): number {
+  return Math.min(
+    Math.max(Math.abs(target) * 1e-3, MIN_ANIMATION_SNAP_DISTANCE),
+    MAX_ANIMATION_SNAP_DISTANCE,
+  );
 }
 
 /**
@@ -41,8 +51,8 @@ export function useAnimatedValue(
       state.current.lastTime = time;
 
       const next = lerp(state.current.current, state.current.target, speed, dt);
-      const range = Math.abs(state.current.target) || 1;
-      const done = Math.abs(next - state.current.target) < range * 1e-3;
+      const done =
+        Math.abs(next - state.current.target) < getAnimationSnapDistance(state.current.target);
 
       state.current.current = done ? state.current.target : next;
       setValue(state.current.current);

@@ -151,6 +151,35 @@ describe("RunPanel", () => {
     expect(screen.getByRole("button", { name: /generating/i }).hasAttribute("disabled")).toBe(true);
   });
 
+  it("allows generation when the checkpoint is persisted but not mounted in state", () => {
+    const persistedRun: TrainingRunRecord = {
+      ...createRun(),
+      checkpoint: undefined,
+      checkpointSavedAt: Date.now(),
+    };
+
+    render(
+      <RunPanel
+        activeRun={persistedRun}
+        activeTab="generated"
+        displayedResults={[]}
+        generationConfig={DEFAULT_GENERATION_CONFIG}
+        isGenerating={false}
+        isHydrating={false}
+        onGenerate={vi.fn()}
+        onTabChange={vi.fn()}
+        onTemperatureChange={vi.fn()}
+        onToggleLike={vi.fn()}
+        repoUrl="https://github.com/cpauldev/train-gpt-in-browser"
+        workerReady={true}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /^generate$/i }).hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+
   it("shows the empty no-run state when there is no active run", () => {
     render(
       <RunPanel
@@ -171,7 +200,9 @@ describe("RunPanel", () => {
 
     expect(screen.getByText(/train gpt in browser/i)).toBeTruthy();
     expect(
-      screen.getByText(/choose a dataset on the left, then start training to see results here/i),
+      screen.getByText(
+        /train a small character-level gpt directly in your browser.*resumes from browser checkpoints/i,
+      ),
     ).toBeTruthy();
   });
 });

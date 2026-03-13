@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toastManager } from "@/components/ui/toast";
-import { buildDreamPhraseArtifactSet, getRunArtifactFile } from "@/lib/dreamphrase-artifacts";
+import {
+  appendLogs,
+  dedupeRunsByFileId,
+  mergeRunIntoCollection,
+  reconcileInterruptedRuns,
+  replaceGeneratedResultsForTemperature,
+  resolveRestoredSelection,
+} from "@/lib/browser-trainer-state";
 import {
   clampTemperature,
   createId,
@@ -11,10 +17,14 @@ import {
 } from "@/lib/trainer-core";
 import { DEFAULT_GENERATION_CONFIG, DEFAULT_TRAINING_CONFIG } from "@/lib/trainer-defaults";
 import { downloadModelFile } from "@/lib/trainer-export";
+import { formatDurationSeconds } from "@/lib/trainer-presentation";
 import {
   createWorkspaceFile,
   deleteTrainingRun,
   deleteWorkspaceFile,
+  getActiveFileId,
+  getActiveRunId,
+  getTrainingRun,
   getTrainingRunArtifact,
   listTrainingRuns,
   listWorkspaceFiles,
@@ -23,28 +33,37 @@ import {
   saveTrainingRun,
   saveTrainingRunArtifacts,
   seedBuiltinWorkspaceFiles,
+  setActiveFileId,
+  setActiveRunId,
   updateWorkspaceFileContent,
   upsertImportedWorkspaceFile,
 } from "@/lib/trainer-storage";
 import {
+  canResumeTrainingRun,
   createGenerationConfig,
+  type DatasetTextSummary,
   type GenerationConfig,
   hasTrainingRun,
   type RunArtifactKind,
   type RunPanelTab,
+  resolveTrainingRunResumeTargetSteps,
   type TrainerCommand,
   type TrainerEvent,
   type TrainingConfig,
   type TrainingRunRecord,
   type WorkspaceFile,
 } from "@/lib/trainer-types";
-import { appendTrainingTelemetryPoint } from "@/lib/training-telemetry";
+import {
+  appendTrainingTelemetryPoint,
+  getLatestTrainingTelemetryElapsedSeconds,
+  shouldPersistTrainingTelemetry,
+} from "@/lib/training-telemetry";
 import {
   partitionWorkspaceImportFiles,
   summarizeRejectedWorkspaceImports,
 } from "@/lib/workspace-imports";
 
-type BusyState = {
+export type BrowserTrainerBusyState = {
   downloading: boolean;
   generating: boolean;
   hydrating: boolean;
@@ -53,10 +72,20 @@ type BusyState = {
   workerReady: boolean;
 };
 
+const INITIAL_BUSY_STATE: BrowserTrainerBusyState = {
+  downloading: false,
+  generating: false,
+  hydrating: true,
+  importing: false,
+  resetting: false,
+  workerReady: false,
+};
+
 export function useBrowserTrainer() {
   const workerRef = useRef<Worker | null>(null);
   const runsRef = useRef<TrainingRunRecord[]>([]);
   const importInFlightRef = useRef(false);
+  const telemetryPersistedAtRef = useRef<Map<string, number>>(new Map());
 
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [runs, setRuns] = useState<TrainingRunRecord[]>([]);
@@ -66,65 +95,97 @@ export function useBrowserTrainer() {
   const [trainingConfig, setTrainingConfig] = useState<TrainingConfig>(DEFAULT_TRAINING_CONFIG);
   const [generationConfig, setGenerationConfig] =
     useState<GenerationConfig>(DEFAULT_GENERATION_CONFIG);
-  const [busyState, setBusyState] = useState<BusyState>({
-    downloading: false,
-    generating: false,
-    hydrating: true,
-    importing: false,
-    resetting: false,
-    workerReady: false,
-  });
+  const [busyState, setBusyState] = useState<BrowserTrainerBusyState>(INITIAL_BUSY_STATE);
 
   useEffect(() => {
     runsRef.current = runs;
   }, [runs]);
+
+  const commitFiles = useCallback((nextFiles: WorkspaceFile[]) => {
+    startTransition(() => {
+      setFiles(nextFiles);
+    });
+  }, []);
+
+  const commitRuns = useCallback((nextRuns: TrainingRunRecord[]) => {
+    runsRef.current = nextRuns;
+    startTransition(() => {
+      setRuns(nextRuns);
+    });
+  }, []);
+
+  const persistSelectedFileId = useCallback((nextFileId: string | null) => {
+    setSelectedFileIdState(nextFileId);
+    void setActiveFileId(nextFileId);
+  }, []);
+
+  const persistActiveRunId = useCallback((nextRunId: string | null) => {
+    setActiveRunIdState(nextRunId);
+    void setActiveRunId(nextRunId);
+  }, []);
+
   const selectedFile = useMemo(
     () => files.find((file) => file.id === selectedFileId) ?? null,
     [files, selectedFileId],
   );
   const activeRun = useMemo(
     () => runs.find((run) => run.id === activeRunId) ?? null,
-    [runs, activeRunId],
+    [activeRunId, runs],
   );
-  const selectedFileSummary = useMemo(() => {
+  const selectedFileSummary = useMemo<DatasetTextSummary | null>(() => {
     if (!selectedFile) {
       return null;
     }
+
     return summarizeDatasetText(selectedFile.content);
   }, [selectedFile]);
 
-  const loadRunIntoWorker = useCallback((run: TrainingRunRecord | null) => {
-    if (!run?.checkpoint || !workerRef.current) {
-      return;
-    }
-
-    workerRef.current.postMessage({
-      checkpoint: run.checkpoint,
-      runId: run.id,
-      type: "loadRun",
-    } satisfies TrainerCommand);
+  const sendCommand = useCallback((command: TrainerCommand) => {
+    workerRef.current?.postMessage(command);
   }, []);
+
+  const getRunForFile = useCallback(
+    (fileId: string | null, availableRuns = runsRef.current) =>
+      fileId ? (availableRuns.find((run) => run.fileId === fileId) ?? null) : null,
+    [],
+  );
+
+  const loadRunIntoWorker = useCallback(
+    (run: TrainingRunRecord | null) => {
+      if (!run?.checkpoint) {
+        return;
+      }
+
+      sendCommand({
+        checkpoint: run.checkpoint,
+        runId: run.id,
+        type: "loadRun",
+      });
+    },
+    [sendCommand],
+  );
+
+  const clearSelection = useCallback(() => {
+    persistSelectedFileId(null);
+    persistActiveRunId(null);
+  }, [persistActiveRunId, persistSelectedFileId]);
 
   const activateRun = useCallback(
     async (runId: string | null, availableRuns = runsRef.current) => {
-      setActiveRunIdState(runId);
+      persistActiveRunId(runId);
 
       const run = availableRuns.find((item) => item.id === runId) ?? null;
       if (!run) {
         return null;
       }
 
+      persistSelectedFileId(run.fileId);
       setTrainingConfig(run.trainingConfig);
       loadRunIntoWorker(run);
       return run;
     },
-    [loadRunIntoWorker],
+    [loadRunIntoWorker, persistActiveRunId, persistSelectedFileId],
   );
-
-  const clearSelection = useCallback(() => {
-    setSelectedFileIdState(null);
-    setActiveRunIdState(null);
-  }, []);
 
   const selectFileAndRun = useCallback(
     async (fileId: string | null, availableRuns = runsRef.current) => {
@@ -133,37 +194,67 @@ export function useBrowserTrainer() {
         return null;
       }
 
-      setSelectedFileIdState(fileId);
+      persistSelectedFileId(fileId);
 
-      const run = availableRuns.find((item) => item.fileId === fileId) ?? null;
+      const run = getRunForFile(fileId, availableRuns);
       if (!run) {
-        setActiveRunIdState(null);
+        persistActiveRunId(null);
         return null;
       }
 
       await activateRun(run.id, availableRuns);
       return run;
     },
-    [activateRun, clearSelection],
+    [activateRun, clearSelection, getRunForFile, persistActiveRunId, persistSelectedFileId],
   );
 
   const hydrate = useCallback(async () => {
     setBusyState((current) => ({ ...current, hydrating: true }));
+    telemetryPersistedAtRef.current.clear();
     await seedBuiltinWorkspaceFiles();
-    const [nextFiles, persistedRuns] = await Promise.all([
-      listWorkspaceFiles(),
-      listTrainingRuns(),
-    ]);
-    const { interruptedRunCount, runs: reconciledRuns } =
-      await reconcileHydratedRuns(persistedRuns);
-    const nextRuns = await normalizeHydratedRuns(reconciledRuns);
 
-    setFiles(nextFiles);
-    setRuns(nextRuns);
-    runsRef.current = nextRuns;
-    clearSelection();
-    setTrainingConfig(DEFAULT_TRAINING_CONFIG);
+    const [nextFiles, persistedRuns, persistedActiveFileId, persistedActiveRunId] =
+      await Promise.all([
+        listWorkspaceFiles(),
+        listTrainingRuns(),
+        getActiveFileId(),
+        getActiveRunId(),
+      ]);
+
+    const {
+      interruptedRunCount,
+      nextRuns: reconciledRuns,
+      updatedRuns,
+    } = reconcileInterruptedRuns(persistedRuns);
+    if (updatedRuns.length > 0) {
+      await Promise.all(updatedRuns.map((run) => saveTrainingRun(run)));
+    }
+
+    const { duplicateRunIds, nextRuns } = dedupeRunsByFileId(reconciledRuns);
+    if (duplicateRunIds.length > 0) {
+      await Promise.all(duplicateRunIds.map((runId) => deleteTrainingRun(runId)));
+    }
+
+    const restoredSelection = resolveRestoredSelection({
+      activeFileId: persistedActiveFileId,
+      activeRunId: persistedActiveRunId,
+      files: nextFiles,
+      runs: nextRuns,
+    });
+
+    commitFiles(nextFiles);
+    commitRuns(nextRuns);
     setGenerationConfig(DEFAULT_GENERATION_CONFIG);
+    setTrainingConfig(DEFAULT_TRAINING_CONFIG);
+
+    persistSelectedFileId(restoredSelection.selectedFileId);
+    persistActiveRunId(restoredSelection.activeRunId);
+
+    const restoredRun = nextRuns.find((run) => run.id === restoredSelection.activeRunId) ?? null;
+    if (restoredRun) {
+      setTrainingConfig(restoredRun.trainingConfig);
+      loadRunIntoWorker(restoredRun);
+    }
 
     if (interruptedRunCount > 0) {
       toastManager.add({
@@ -177,35 +268,31 @@ export function useBrowserTrainer() {
     }
 
     setBusyState((current) => ({ ...current, hydrating: false }));
-  }, [clearSelection]);
+  }, [commitFiles, commitRuns, loadRunIntoWorker, persistActiveRunId, persistSelectedFileId]);
 
   const replaceRun = useCallback(
     async (
-      run: TrainingRunRecord,
-      options?: { persist?: boolean; persistCheckpoint?: boolean },
+      nextRun: TrainingRunRecord,
+      options?: {
+        persist?: boolean;
+        persistCheckpoint?: boolean;
+      },
     ) => {
-      const currentRuns = runsRef.current;
-      const duplicateRuns = currentRuns.filter(
-        (item) => item.fileId === run.fileId && item.id !== run.id,
-      );
-      const nextRuns = sortRunsByRecent([
-        run,
-        ...currentRuns.filter((item) => item.id !== run.id && item.fileId !== run.fileId),
-      ]);
+      const { duplicateRuns, nextRuns } = mergeRunIntoCollection(runsRef.current, nextRun);
 
       if (duplicateRuns.length > 0) {
-        await Promise.all(duplicateRuns.map((item) => deleteTrainingRun(item.id)));
+        await Promise.all(duplicateRuns.map((run) => deleteTrainingRun(run.id)));
       }
 
-      runsRef.current = nextRuns;
-      setRuns(nextRuns);
+      commitRuns(nextRuns);
+
       if (options?.persist !== false) {
-        await saveTrainingRun(run, {
+        await saveTrainingRun(nextRun, {
           persistCheckpoint: options?.persistCheckpoint,
         });
       }
     },
-    [],
+    [commitRuns],
   );
 
   const cacheRunExport = useCallback(
@@ -217,6 +304,30 @@ export function useBrowserTrainer() {
     [replaceRun],
   );
 
+  const loadLatestRunCheckpoint = useCallback(
+    async (run: TrainingRunRecord | null) => {
+      if (!run) {
+        return null;
+      }
+
+      const persistedRun = await getTrainingRun(run.id);
+      if (!persistedRun?.checkpoint) {
+        return run.checkpoint ? run : null;
+      }
+
+      const hydratedRun: TrainingRunRecord = {
+        ...run,
+        checkpoint: persistedRun.checkpoint,
+        checkpointSavedAt: persistedRun.checkpointSavedAt ?? persistedRun.checkpoint.exportedAt,
+        datasetStats: persistedRun.datasetStats,
+      };
+
+      await replaceRun(hydratedRun, { persist: false });
+      return hydratedRun;
+    },
+    [replaceRun],
+  );
+
   const handleWorkerEvent = useCallback(
     async (event: TrainerEvent) => {
       switch (event.type) {
@@ -224,11 +335,13 @@ export function useBrowserTrainer() {
           setBusyState((current) => ({ ...current, workerReady: true }));
           return;
         }
+
         case "trainingStarted": {
           const run = runsRef.current.find((item) => item.id === event.runId);
           if (!run) {
             return;
           }
+
           const logs = appendLogs(run.logs, [event.logEntry]);
           if (run.trainingConfig.requestedBackend !== "cpu" && event.resolvedBackend === "cpu") {
             logs.push(
@@ -243,6 +356,7 @@ export function useBrowserTrainer() {
               type: "warning",
             });
           }
+
           await replaceRun(
             {
               ...run,
@@ -255,11 +369,13 @@ export function useBrowserTrainer() {
           setActiveTab("generated");
           return;
         }
+
         case "log": {
           const run = runsRef.current.find((item) => item.id === event.runId);
           if (!run) {
             return;
           }
+
           await replaceRun(
             {
               ...run,
@@ -270,11 +386,13 @@ export function useBrowserTrainer() {
           );
           return;
         }
+
         case "trainingProgress": {
           const run = runsRef.current.find((item) => item.id === event.runId);
           if (!run) {
             return;
           }
+
           await replaceRun(
             {
               ...run,
@@ -286,68 +404,97 @@ export function useBrowserTrainer() {
           );
           return;
         }
+
         case "trainingTelemetry": {
           const run = runsRef.current.find((item) => item.id === event.runId);
           if (!run) {
             return;
           }
-          await replaceRun(
-            {
-              ...run,
-              status: "training",
-              telemetry: appendTrainingTelemetryPoint(run.telemetry, event.point),
-              updatedAt: Date.now(),
-            },
-            { persist: false },
+
+          const nextTelemetry = appendTrainingTelemetryPoint(run.telemetry, event.point);
+          const updatedAt = Math.max(Date.now(), Math.round(event.point.time * 1000));
+          const nextRun: TrainingRunRecord = {
+            ...run,
+            status: "training",
+            telemetry: nextTelemetry,
+            updatedAt,
+          };
+          const lastPersistedAt = telemetryPersistedAtRef.current.get(event.runId);
+          const shouldPersistTelemetry = shouldPersistTrainingTelemetry(
+            lastPersistedAt,
+            event.point,
           );
+
+          await replaceRun(
+            nextRun,
+            shouldPersistTelemetry ? { persistCheckpoint: false } : { persist: false },
+          );
+          if (shouldPersistTelemetry) {
+            telemetryPersistedAtRef.current.set(event.runId, updatedAt);
+          }
           return;
         }
+
         case "trainingCheckpoint": {
           const run = runsRef.current.find((item) => item.id === event.runId);
           if (!run) {
             return;
           }
-          await replaceRun({
-            ...run,
-            checkpoint: event.checkpoint,
-            datasetStats: event.checkpoint.datasetStats,
-            updatedAt: Date.now(),
-          });
+
+          await replaceRun(
+            {
+              ...run,
+              checkpointSavedAt: event.checkpointSavedAt,
+              datasetStats: event.datasetStats,
+              updatedAt: event.checkpointSavedAt,
+            },
+            { persistCheckpoint: false },
+          );
+          telemetryPersistedAtRef.current.set(event.runId, event.checkpointSavedAt);
           return;
         }
+
         case "trainingCompleted": {
           const run = runsRef.current.find((item) => item.id === event.runId);
           if (!run) {
             return;
           }
+
           const nextRun: TrainingRunRecord = {
             ...run,
-            checkpoint: event.checkpoint,
-            datasetStats: event.checkpoint.datasetStats,
+            checkpoint: undefined,
+            checkpointSavedAt: event.checkpointSavedAt,
+            datasetStats: event.datasetStats,
             generatedResults: replaceGeneratedResultsForTemperature(
               run.generatedResults,
               event.temperatureKey,
               event.generatedResults,
             ),
             status: "completed",
-            updatedAt: Date.now(),
+            updatedAt: event.checkpointSavedAt,
           };
-          await replaceRun(nextRun);
-          setActiveRunIdState(event.runId);
+
+          await replaceRun(nextRun, { persistCheckpoint: false });
+          telemetryPersistedAtRef.current.delete(event.runId);
+          persistActiveRunId(event.runId);
+          persistSelectedFileId(nextRun.fileId);
           setActiveTab("generated");
           toastManager.add({
-            description: "Your model is ready.",
+            description: `Your model is ready. Completed in ${formatDurationSeconds(event.elapsedSeconds)}.`,
             title: "Training complete",
             type: "success",
           });
           return;
         }
+
         case "generationCompleted": {
           setBusyState((current) => ({ ...current, generating: false }));
+
           const run = runsRef.current.find((item) => item.id === event.runId);
           if (!run) {
             return;
           }
+
           await replaceRun(
             {
               ...run,
@@ -364,6 +511,7 @@ export function useBrowserTrainer() {
           setActiveTab("generated");
           return;
         }
+
         case "error": {
           setBusyState((current) => ({ ...current, downloading: false, generating: false }));
           toastManager.add({
@@ -371,13 +519,16 @@ export function useBrowserTrainer() {
             title: "Training error",
             type: "error",
           });
+
           if (!event.runId) {
             return;
           }
+
           const run = runsRef.current.find((item) => item.id === event.runId);
           if (!run) {
             return;
           }
+
           await replaceRun(
             {
               ...run,
@@ -390,16 +541,18 @@ export function useBrowserTrainer() {
           );
           return;
         }
+
         case "resetComplete": {
           return;
         }
+
         default: {
           const exhaustive: never = event;
           throw new Error(`Unhandled worker event: ${JSON.stringify(exhaustive)}`);
         }
       }
     },
-    [replaceRun],
+    [persistActiveRunId, persistSelectedFileId, replaceRun],
   );
 
   useEffect(() => {
@@ -422,12 +575,14 @@ export function useBrowserTrainer() {
     };
   }, [handleWorkerEvent, hydrate]);
 
-  const createFile = useCallback(async (name: string) => {
-    const file = await createWorkspaceFile(name, "");
-    const nextFiles = await listWorkspaceFiles();
-    setFiles(nextFiles);
-    return file;
-  }, []);
+  const createFile = useCallback(
+    async (name: string) => {
+      const file = await createWorkspaceFile(name, "");
+      commitFiles(await listWorkspaceFiles());
+      return file;
+    },
+    [commitFiles],
+  );
 
   const importFiles = useCallback(
     async (fileList: FileList | File[]) => {
@@ -453,15 +608,17 @@ export function useBrowserTrainer() {
 
       importInFlightRef.current = true;
       setBusyState((current) => ({ ...current, importing: true }));
+
       try {
-        let lastImportedId: string | null = null;
-        for (const file of accepted) {
-          const content = await file.text();
-          const createdFile = await upsertImportedWorkspaceFile(file.name, content);
-          lastImportedId = createdFile.id;
-        }
-        const nextFiles = await listWorkspaceFiles();
-        setFiles(nextFiles);
+        const importedFiles = await Promise.all(
+          accepted.map(async (file) => {
+            const content = await file.text();
+            return upsertImportedWorkspaceFile(file.name, content);
+          }),
+        );
+        const lastImportedId = importedFiles.at(-1)?.id ?? null;
+
+        commitFiles(await listWorkspaceFiles());
         await selectFileAndRun(lastImportedId);
         return accepted.length;
       } finally {
@@ -469,7 +626,7 @@ export function useBrowserTrainer() {
         setBusyState((current) => ({ ...current, importing: false }));
       }
     },
-    [selectFileAndRun],
+    [commitFiles, selectFileAndRun],
   );
 
   const selectFile = useCallback(
@@ -484,6 +641,7 @@ export function useBrowserTrainer() {
       if (!selectedFileId) {
         return;
       }
+
       const updatedFile = await updateWorkspaceFileContent(selectedFileId, content);
       setFiles((current) =>
         current.map((file) => (file.id === updatedFile.id ? updatedFile : file)),
@@ -497,6 +655,7 @@ export function useBrowserTrainer() {
       if (!selectedFileId) {
         return;
       }
+
       const updatedFile = await renameWorkspaceFile(selectedFileId, name);
       setFiles((current) =>
         current.map((file) => (file.id === updatedFile.id ? updatedFile : file)),
@@ -512,25 +671,35 @@ export function useBrowserTrainer() {
         .map((run) => run.id);
 
       if (selectedFileId === fileId) {
-        await clearSelection();
+        clearSelection();
+      } else if (activeRunId && relatedRunIds.includes(activeRunId)) {
+        persistActiveRunId(null);
       }
 
       await Promise.all(
         relatedRunIds.map(async (runId) => {
-          workerRef.current?.postMessage({
+          sendCommand({
             runId,
             type: "deleteRun",
-          } satisfies TrainerCommand);
+          });
           await deleteTrainingRun(runId);
         }),
       );
       await deleteWorkspaceFile(fileId);
+
       const [nextFiles, nextRuns] = await Promise.all([listWorkspaceFiles(), listTrainingRuns()]);
-      setFiles(nextFiles);
-      runsRef.current = nextRuns;
-      setRuns(nextRuns);
+      commitFiles(nextFiles);
+      commitRuns(nextRuns);
     },
-    [clearSelection, selectedFileId],
+    [
+      activeRunId,
+      clearSelection,
+      commitFiles,
+      commitRuns,
+      persistActiveRunId,
+      selectedFileId,
+      sendCommand,
+    ],
   );
 
   const startTraining = useCallback(
@@ -538,21 +707,20 @@ export function useBrowserTrainer() {
       if (hasTrainingRun(runsRef.current)) {
         return;
       }
+
       const fileToTrain = fileOverride ?? selectedFile;
-      if (!fileToTrain || !workerRef.current) {
+      if (!fileToTrain) {
         return;
       }
 
       const existingRun = runsRef.current.find((item) => item.fileId === fileToTrain.id) ?? null;
       if (existingRun) {
-        workerRef.current.postMessage({
+        sendCommand({
           runId: existingRun.id,
           type: "deleteRun",
-        } satisfies TrainerCommand);
+        });
         await deleteTrainingRun(existingRun.id);
-        const filteredRuns = runsRef.current.filter((item) => item.id !== existingRun.id);
-        runsRef.current = filteredRuns;
-        setRuns(filteredRuns);
+        commitRuns(runsRef.current.filter((item) => item.id !== existingRun.id));
       }
 
       const summary = summarizeDatasetText(fileToTrain.content);
@@ -587,10 +755,11 @@ export function useBrowserTrainer() {
       };
 
       await replaceRun(run);
-      setActiveRunIdState(runId);
+      persistSelectedFileId(fileToTrain.id);
+      persistActiveRunId(runId);
       setActiveTab("generated");
 
-      workerRef.current.postMessage({
+      sendCommand({
         file: {
           content: fileToTrain.content,
           id: fileToTrain.id,
@@ -603,109 +772,166 @@ export function useBrowserTrainer() {
         runId,
         trainingConfig: run.trainingConfig,
         type: "startTraining",
-      } satisfies TrainerCommand);
+      });
     },
-    [generationConfig, replaceRun, selectedFile, trainingConfig],
+    [
+      commitRuns,
+      generationConfig,
+      persistActiveRunId,
+      persistSelectedFileId,
+      replaceRun,
+      selectedFile,
+      sendCommand,
+      trainingConfig,
+    ],
   );
 
   const resumeRun = useCallback(
     async (runId: string) => {
       const run = runsRef.current.find((item) => item.id === runId);
-      if (!run?.checkpoint || !workerRef.current || run.status === "training") {
+      if (!run || run.status === "training") {
+        return;
+      }
+
+      const checkpointedRun = await loadLatestRunCheckpoint(run);
+      if (!checkpointedRun?.checkpoint) {
         return;
       }
 
       const nextTrainingConfig: TrainingConfig = {
-        ...run.trainingConfig,
-        model: run.checkpoint.modelConfig,
+        ...trainingConfig,
+        steps: resolveTrainingRunResumeTargetSteps(checkpointedRun, trainingConfig.steps),
+        model: checkpointedRun.checkpoint.modelConfig,
       };
+      const checkpoint = {
+        ...checkpointedRun.checkpoint,
+        resumeState: {
+          ...checkpointedRun.checkpoint.resumeState,
+          elapsedTrainingSeconds: Math.max(
+            checkpointedRun.checkpoint.resumeState.elapsedTrainingSeconds ?? 0,
+            getLatestTrainingTelemetryElapsedSeconds(checkpointedRun.telemetry),
+          ),
+        },
+      };
+
+      if (!canResumeTrainingRun(checkpointedRun, nextTrainingConfig.steps)) {
+        toastManager.add({
+          description: "This run does not have a resumable checkpoint.",
+          title: "Resume unavailable",
+          type: "warning",
+        });
+        return;
+      }
+
       await replaceRun({
-        ...run,
+        ...checkpointedRun,
+        checkpoint: undefined,
+        checkpointSavedAt:
+          checkpointedRun.checkpointSavedAt ?? checkpointedRun.checkpoint.exportedAt,
         status: "training",
         trainingConfig: nextTrainingConfig,
         updatedAt: Date.now(),
       });
-      setActiveRunIdState(runId);
+      persistSelectedFileId(run.fileId);
+      persistActiveRunId(runId);
       setActiveTab("generated");
 
-      workerRef.current.postMessage({
-        checkpoint: run.checkpoint,
+      sendCommand({
+        checkpoint,
         file: {
           content: "",
-          id: run.fileId,
-          name: run.fileName,
+          id: checkpointedRun.fileId,
+          name: checkpointedRun.fileName,
         },
         generationConfig: {
           ...generationConfig,
-          requestedBlockSize: run.checkpoint.tokenizer.blockSize,
+          requestedBlockSize: checkpoint.tokenizer.blockSize,
         },
         runId,
         trainingConfig: nextTrainingConfig,
         type: "resumeTraining",
-      } satisfies TrainerCommand);
+      });
     },
-    [generationConfig, replaceRun],
+    [
+      trainingConfig,
+      generationConfig,
+      loadLatestRunCheckpoint,
+      persistActiveRunId,
+      persistSelectedFileId,
+      replaceRun,
+      sendCommand,
+    ],
   );
 
   const generateForActiveRun = useCallback(
     async (temperature: number) => {
       if (
-        !activeRun?.checkpoint ||
-        !workerRef.current ||
+        !activeRun ||
         activeRun.status === "training" ||
-        busyState.generating
+        busyState.generating ||
+        (!activeRun.checkpoint && !activeRun.checkpointSavedAt)
       ) {
+        return;
+      }
+
+      setBusyState((current) => ({ ...current, generating: true }));
+      const checkpointedRun = await loadLatestRunCheckpoint(activeRun);
+      if (!checkpointedRun?.checkpoint) {
+        setBusyState((current) => ({ ...current, generating: false }));
         return;
       }
 
       const config = createGenerationConfig({
         numSamples: generationConfig.numSamples,
-        requestedBlockSize: activeRun.checkpoint.tokenizer.blockSize,
+        requestedBlockSize: checkpointedRun.checkpoint.tokenizer.blockSize,
         temperature: clampTemperature(temperature),
       });
 
-      setBusyState((current) => ({ ...current, generating: true }));
-      workerRef.current.postMessage({
-        checkpoint: activeRun.checkpoint,
+      sendCommand({
+        checkpoint: checkpointedRun.checkpoint,
         generationConfig: config,
-        runId: activeRun.id,
+        runId: checkpointedRun.id,
         type: "generateSamples",
-      } satisfies TrainerCommand);
+      });
     },
-    [activeRun, busyState.generating, generationConfig],
+    [activeRun, busyState.generating, generationConfig, loadLatestRunCheckpoint, sendCommand],
   );
 
   const ensureRunArtifacts = useCallback(
     async (run: TrainingRunRecord) => {
-      if (!run.checkpoint) {
-        throw new Error("This run does not have a saved checkpoint yet.");
-      }
-
       const model = await getTrainingRunArtifact(run.id, "model");
-
       if (model) {
         return { model };
       }
 
-      const artifactSet = buildDreamPhraseArtifactSet(run.checkpoint, run.name);
-      await cacheRunExport(run, artifactSet);
+      const checkpointedRun = await loadLatestRunCheckpoint(run);
+      if (!checkpointedRun?.checkpoint) {
+        throw new Error("This run does not have a saved checkpoint yet.");
+      }
+
+      const { buildDreamPhraseArtifactSet } = await import("@/lib/dreamphrase-artifacts");
+      const artifactSet = buildDreamPhraseArtifactSet(
+        checkpointedRun.checkpoint,
+        checkpointedRun.name,
+      );
+      await cacheRunExport(checkpointedRun, artifactSet);
       return artifactSet;
     },
-    [cacheRunExport],
+    [cacheRunExport, loadLatestRunCheckpoint],
   );
 
   const downloadRunArtifact = useCallback(
     async (runId: string, kind: RunArtifactKind) => {
       const run = runsRef.current.find((item) => item.id === runId);
-
-      if (!run?.checkpoint || run.status === "training") {
+      if (!run || run.status === "training" || (!run.checkpoint && !run.checkpointSavedAt)) {
         return;
       }
 
       setBusyState((current) => ({ ...current, downloading: true }));
+
       try {
         const artifactSet = await ensureRunArtifacts(run);
-        const artifact = getRunArtifactFile(artifactSet, kind);
+        const artifact = artifactSet[kind];
         downloadModelFile(artifact);
         toastManager.add({
           description: "Your model file has been saved to Downloads.",
@@ -730,25 +956,24 @@ export function useBrowserTrainer() {
       if (hasTrainingRun(runsRef.current)) {
         return;
       }
+
       const runToRemove = runsRef.current.find((item) => item.id === runId);
       if (!runToRemove) {
         return;
       }
 
-      const nextRuns = runsRef.current.filter((item) => item.id !== runId);
-      flushSync(() => {
-        runsRef.current = nextRuns;
-        setRuns(nextRuns);
+      commitRuns(runsRef.current.filter((item) => item.id !== runId));
 
-        if (activeRunId === runId) {
-          setActiveRunIdState(null);
-        }
-      });
+      if (activeRunId === runId) {
+        persistActiveRunId(null);
+      }
 
-      workerRef.current?.postMessage({
+      sendCommand({
         runId,
         type: "deleteRun",
-      } satisfies TrainerCommand);
+      });
+
+      telemetryPersistedAtRef.current.delete(runId);
       try {
         await deleteTrainingRun(runId);
       } catch (error) {
@@ -761,7 +986,7 @@ export function useBrowserTrainer() {
         return;
       }
     },
-    [activeRunId, hydrate],
+    [activeRunId, commitRuns, hydrate, persistActiveRunId, sendCommand],
   );
 
   const toggleLike = useCallback(
@@ -793,7 +1018,7 @@ export function useBrowserTrainer() {
 
   const resetAll = useCallback(async () => {
     setBusyState((current) => ({ ...current, generating: false, resetting: true }));
-    workerRef.current?.postMessage({ type: "resetAll" } satisfies TrainerCommand);
+    sendCommand({ type: "resetAll" });
     await resetTrainerStorage();
     await hydrate();
     setTrainingConfig(DEFAULT_TRAINING_CONFIG);
@@ -804,106 +1029,50 @@ export function useBrowserTrainer() {
       type: "success",
     });
     setBusyState((current) => ({ ...current, resetting: false }));
-  }, [hydrate]);
+  }, [hydrate, sendCommand]);
+
+  const hasActiveTraining = useMemo(() => hasTrainingRun(runs), [runs]);
 
   return {
-    activeRun,
-    activeTab,
     busyState,
-    createFile,
-    downloadRunArtifact,
-    files,
-    generationConfig,
-    generateForActiveRun,
-    importFiles,
-    removeFile,
-    removeRun,
-    resetAll,
-    resumeRun,
-    runs,
-    saveSelectedFileContent,
-    saveSelectedFileName,
-    selectFile,
-    selectedFile,
-    selectedFileId,
-    selectedFileSummary,
-    setActiveTab,
-    setGenerationConfig,
-    setTrainingConfig,
-    startTraining,
-    toggleLike,
-    trainingConfig,
+    generation: {
+      activeTab,
+      config: generationConfig,
+      generateForActiveRun,
+      setActiveTab,
+      setConfig: setGenerationConfig,
+      toggleLike,
+    },
+    maintenance: {
+      resetAll,
+    },
+    runs: {
+      active: activeRun,
+      all: runs,
+      downloadArtifact: downloadRunArtifact,
+      getByFileId: getRunForFile,
+      remove: removeRun,
+      resume: resumeRun,
+      start: startTraining,
+    },
+    training: {
+      config: trainingConfig,
+      hasActiveTraining,
+      setConfig: setTrainingConfig,
+    },
+    workspace: {
+      createFile,
+      files,
+      importFiles,
+      removeFile,
+      saveSelectedFileContent,
+      saveSelectedFileName,
+      selectFile,
+      selectedFile,
+      selectedFileId,
+      selectedFileSummary,
+    },
   };
 }
 
-function appendLogs(current: TrainingRunRecord["logs"], entries: TrainingRunRecord["logs"]) {
-  return [...current, ...entries];
-}
-
-function replaceGeneratedResultsForTemperature(
-  current: TrainingRunRecord["generatedResults"],
-  temperatureKey: string,
-  nextResults: string[],
-) {
-  return {
-    ...current,
-    [temperatureKey]: [...nextResults],
-  };
-}
-
-async function normalizeHydratedRuns(runs: TrainingRunRecord[]) {
-  const keptRuns = new Map<string, TrainingRunRecord>();
-  const duplicateRunIds: string[] = [];
-
-  for (const run of sortRunsByRecent(runs)) {
-    if (!keptRuns.has(run.fileId)) {
-      keptRuns.set(run.fileId, run);
-      continue;
-    }
-
-    duplicateRunIds.push(run.id);
-  }
-
-  if (duplicateRunIds.length > 0) {
-    await Promise.all(duplicateRunIds.map((runId) => deleteTrainingRun(runId)));
-  }
-
-  return sortRunsByRecent([...keptRuns.values()]);
-}
-
-async function reconcileHydratedRuns(runs: TrainingRunRecord[]) {
-  const updatedAt = Date.now();
-  let interruptedRunCount = 0;
-
-  const nextRuns = await Promise.all(
-    runs.map(async (run) => {
-      if (run.status !== "training") {
-        return run;
-      }
-
-      interruptedRunCount += 1;
-      const message = run.checkpoint
-        ? "Browser session ended before training completed. Resume this run to continue from the latest checkpoint."
-        : "Browser session ended before the first checkpoint was saved. Start training again to recreate this run.";
-      const nextRun: TrainingRunRecord = {
-        ...run,
-        lastError: run.checkpoint ? run.lastError : message,
-        logs: appendLogs(run.logs, [createLogEntry(message, run.checkpoint ? "line" : "error")]),
-        status: run.checkpoint ? "idle" : "error",
-        updatedAt,
-      };
-
-      await saveTrainingRun(nextRun);
-      return nextRun;
-    }),
-  );
-
-  return {
-    interruptedRunCount,
-    runs: sortRunsByRecent(nextRuns),
-  };
-}
-
-function sortRunsByRecent(runs: TrainingRunRecord[]) {
-  return [...runs].sort((left, right) => right.updatedAt - left.updatedAt);
-}
+export type BrowserTrainerController = ReturnType<typeof useBrowserTrainer>;

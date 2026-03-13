@@ -9,19 +9,18 @@ import {
   TextCursorInput,
   Trash2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
-import { CodeEditorSurface } from "@/components/code-editor-surface";
 import { InspectView } from "@/components/inspect-view";
+import { PanelLoadingState } from "@/components/panel-loading-state";
 import { SidebarFrameHeader } from "@/components/sidebar-frame-header";
-import { TrainingLiveStats } from "@/components/training-live-stats";
+import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Frame, FramePanel } from "@/components/ui/frame";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -33,8 +32,10 @@ import {
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { Toggle } from "@/components/ui/toggle";
 import { formatNumber } from "@/lib/trainer-core";
+import { formatEtaSeconds } from "@/lib/trainer-presentation";
 import {
   createGenerationConfig,
+  type DatasetTextSummary,
   type GenerationConfig,
   type TrainingConfig,
   type TrainingRunRecord,
@@ -42,6 +43,16 @@ import {
 } from "@/lib/trainer-types";
 import { getLatestTrainingTelemetry } from "@/lib/training-telemetry";
 import { useAnimatedValue } from "@/lib/use-animated-value";
+
+const CodeEditorSurface = lazy(async () => {
+  const module = await import("@/components/code-editor-surface");
+  return { default: module.CodeEditorSurface };
+});
+
+const TrainingLiveStats = lazy(async () => {
+  const module = await import("@/components/training-live-stats");
+  return { default: module.TrainingLiveStats };
+});
 
 export function SidebarEditorView({
   canTrain,
@@ -78,7 +89,7 @@ export function SidebarEditorView({
   onDownloadModel?: () => void;
   onDraftContentChange: (value: string) => void;
   onDraftNameChange: (value: string) => void;
-  onSaveContent: (content: string) => void;
+  onSaveContent?: (content: string) => void;
   onGenerationConfigChange: (
     config: GenerationConfig | ((current: GenerationConfig) => GenerationConfig),
   ) => void;
@@ -88,13 +99,7 @@ export function SidebarEditorView({
     config: TrainingConfig | ((current: TrainingConfig) => TrainingConfig),
   ) => void;
   selectedFile: WorkspaceFile | null;
-  selectedFileSummary: {
-    characterCount: number;
-    documents: string[];
-    lineCount: number;
-    tokenCount: number;
-    vocabSize: number;
-  } | null;
+  selectedFileSummary: DatasetTextSummary | null;
   selectedRun: TrainingRunRecord | null;
   trainingConfig: TrainingConfig;
 }) {
@@ -110,20 +115,28 @@ export function SidebarEditorView({
   }, [selectedFile?.id]);
 
   const handleSaveContent = () => {
-    onSaveContent(draftContent);
+    onSaveContent?.(draftContent);
     setSavedContent(draftContent);
   };
 
-  const canContinueTraining = Boolean(selectedRun?.checkpoint);
+  const canContinueTraining = Boolean(onResumeTraining);
+  const latestTrainingPoint = getLatestTrainingTelemetry(selectedRun?.telemetry ?? []);
+  const isFinalizingTraining =
+    isTraining &&
+    Boolean(latestTrainingPoint && latestTrainingPoint.step >= latestTrainingPoint.totalSteps);
   const rawEtaSeconds = isTraining
-    ? computeEtaSeconds(getLatestTrainingTelemetry(selectedRun?.telemetry ?? []))
+    ? isFinalizingTraining
+      ? null
+      : computeEtaSeconds(latestTrainingPoint)
     : null;
   const animatedEtaSeconds = useAnimatedValue(rawEtaSeconds ?? 0, {
     enabled: rawEtaSeconds !== null,
   });
   const trainingEta = rawEtaSeconds !== null ? formatEtaSeconds(animatedEtaSeconds) : null;
   const trainingActionLabel = isTraining
-    ? "Training in progress"
+    ? isFinalizingTraining
+      ? "Finalizing results"
+      : "Training in progress"
     : canContinueTraining
       ? "Continue training"
       : "Start training";
@@ -134,6 +147,12 @@ export function SidebarEditorView({
   ) : (
     <Play className="size-4.5" />
   );
+  const trainingControlFields = createTrainingControlFields({
+    generationConfig,
+    onGenerationConfigChange,
+    onTrainingConfigChange,
+    trainingConfig,
+  });
 
   useEffect(() => {
     if (selectedRun?.status !== "training") {
@@ -297,152 +316,41 @@ export function SidebarEditorView({
                       </p>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <LabeledSelect
-                        label="Backend"
-                        value={trainingConfig.requestedBackend}
-                        onChange={(value) =>
-                          onTrainingConfigChange((current) => ({
-                            ...current,
-                            requestedBackend: value as TrainingConfig["requestedBackend"],
-                          }))
-                        }
-                        options={[
-                          { label: "Auto", value: "auto" },
-                          { label: "WebGPU", value: "webgpu" },
-                          { label: "CPU", value: "cpu" },
-                        ]}
-                      />
-                      <LabeledNumberField
-                        label="Seed"
-                        step={1}
-                        value={trainingConfig.seed}
-                        onChange={(value) =>
-                          onTrainingConfigChange((current) => ({
-                            ...current,
-                            seed: Math.max(1, value),
-                          }))
-                        }
-                      />
-                      <LabeledNumberField
-                        label="Steps"
-                        step={1}
-                        value={trainingConfig.steps}
-                        onChange={(value) =>
-                          onTrainingConfigChange((current) => ({
-                            ...current,
-                            steps: Math.max(1, value),
-                          }))
-                        }
-                      />
-                      <LabeledNumberField
-                        label="Batch size"
-                        step={1}
-                        value={trainingConfig.batchSize}
-                        onChange={(value) =>
-                          onTrainingConfigChange((current) => ({
-                            ...current,
-                            batchSize: Math.max(1, value),
-                          }))
-                        }
-                      />
-                      <LabeledNumberField
-                        label="Block size"
-                        step={1}
-                        value={trainingConfig.model.blockSize}
-                        onChange={(value) =>
-                          onTrainingConfigChange((current) => ({
-                            ...current,
-                            model: { ...current.model, blockSize: Math.max(1, value) },
-                          }))
-                        }
-                      />
-                      <LabeledNumberField
-                        label="Layers"
-                        step={1}
-                        value={trainingConfig.model.nLayer}
-                        onChange={(value) =>
-                          onTrainingConfigChange((current) => ({
-                            ...current,
-                            model: { ...current.model, nLayer: Math.max(1, value) },
-                          }))
-                        }
-                      />
-                      <LabeledNumberField
-                        label="Embedding width"
-                        step={1}
-                        value={trainingConfig.model.nEmbd}
-                        onChange={(value) =>
-                          onTrainingConfigChange((current) => ({
-                            ...current,
-                            model: { ...current.model, nEmbd: Math.max(1, value) },
-                          }))
-                        }
-                      />
-                      <LabeledNumberField
-                        label="Attention heads"
-                        step={1}
-                        value={trainingConfig.model.nHead}
-                        onChange={(value) =>
-                          onTrainingConfigChange((current) => ({
-                            ...current,
-                            model: { ...current.model, nHead: Math.max(1, value) },
-                          }))
-                        }
-                      />
-                      <LabeledNumberField
-                        label="Learning rate"
-                        step={0.0001}
-                        value={trainingConfig.learningRate}
-                        onChange={(value) =>
-                          onTrainingConfigChange((current) => ({
-                            ...current,
-                            learningRate: Math.max(0.0000001, value),
-                          }))
-                        }
-                      />
-                      <LabeledNumberField
-                        label="Weight decay"
-                        step={0.001}
-                        value={trainingConfig.weightDecay}
-                        onChange={(value) =>
-                          onTrainingConfigChange((current) => ({
-                            ...current,
-                            weightDecay: Math.max(0, value),
-                          }))
-                        }
-                      />
-                      <LabeledNumberField
-                        label="Samples after train"
-                        step={1}
-                        value={generationConfig.numSamples}
-                        onChange={(value) =>
-                          onGenerationConfigChange((current) =>
-                            createGenerationConfig({
-                              ...current,
-                              numSamples: Math.max(1, value),
-                            }),
-                          )
-                        }
-                      />
-                      <LabeledNumberField
-                        label="Default temperature"
-                        step={0.1}
-                        value={generationConfig.temperature}
-                        onChange={(value) =>
-                          onGenerationConfigChange((current) =>
-                            createGenerationConfig({
-                              ...current,
-                              temperature: Math.min(1.4, Math.max(0.4, Number(value.toFixed(1)))),
-                            }),
-                          )
-                        }
-                      />
+                      {trainingControlFields.map((field) =>
+                        field.kind === "select" ? (
+                          <LabeledSelect
+                            key={field.label}
+                            label={field.label}
+                            value={field.value}
+                            onChange={field.onChange}
+                            options={field.options}
+                          />
+                        ) : (
+                          <LabeledNumberField
+                            key={field.label}
+                            label={field.label}
+                            step={field.step}
+                            value={field.value}
+                            onChange={field.onChange}
+                          />
+                        ),
+                      )}
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-6">
-                    <TrainingLiveStats isTraining={isTraining} run={selectedRun} />
-                  </div>
+                  <Suspense
+                    fallback={
+                      <PanelLoadingState
+                        className="min-h-[18rem] px-5 py-5"
+                        title="Loading training stats"
+                        description="Preparing live telemetry charts for this run."
+                      />
+                    }
+                  >
+                    <div className="space-y-6">
+                      <TrainingLiveStats isTraining={isTraining} run={selectedRun} />
+                    </div>
+                  </Suspense>
                 )}
               </ScrollArea>
 
@@ -465,7 +373,7 @@ export function SidebarEditorView({
                     {trainingEta && (
                       <Badge
                         variant="outline"
-                        className="ml-auto shrink-0 bg-white/10 border-white/20 text-white tabular-nums"
+                        className="ml-auto shrink-0 border-current/15 bg-current/10 text-inherit tabular-nums"
                       >
                         {trainingEta}
                       </Badge>
@@ -496,14 +404,24 @@ export function SidebarEditorView({
                 </div>
               </div>
 
-              <CodeEditorSurface
-                ariaLabel="Source text"
-                className="flex-1"
-                showLineNumbers
-                readOnly={isTraining}
-                value={draftContent}
-                onChange={onDraftContentChange}
-              />
+              <Suspense
+                fallback={
+                  <PanelLoadingState
+                    className="flex-1"
+                    title="Loading editor"
+                    description="Preparing the source editor for this dataset."
+                  />
+                }
+              >
+                <CodeEditorSurface
+                  ariaLabel="Source text"
+                  className="flex-1"
+                  showLineNumbers
+                  readOnly={isTraining}
+                  value={draftContent}
+                  onChange={onDraftContentChange}
+                />
+              </Suspense>
 
               <div className="border-t border-border/70 px-5 py-4">
                 <div className="flex items-stretch gap-2">
@@ -542,26 +460,179 @@ function computeEtaSeconds(point: ReturnType<typeof getLatestTrainingTelemetry>)
   return Math.ceil(remaining / point.stepsPerSecond);
 }
 
-function formatEtaSeconds(totalSeconds: number): string {
-  const s = Math.round(totalSeconds);
-  if (s < 60) return `${s}s`;
-  const minutes = Math.floor(s / 60);
-  const seconds = s % 60;
-  if (minutes < 60) return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
-}
+type TrainingControlField =
+  | {
+      kind: "number";
+      label: string;
+      onChange: (value: number) => void;
+      step: number;
+      value: number;
+    }
+  | {
+      kind: "select";
+      label: string;
+      onChange: (value: string) => void;
+      options: Array<{ label: string; value: string }>;
+      value: string;
+    };
 
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-border/70 bg-background px-4 py-3">
-      <Label render={<div />} className="text-xs text-muted-foreground">
-        {label}
-      </Label>
-      <div className="mt-1 font-semibold text-lg">{value}</div>
-    </div>
-  );
+function createTrainingControlFields({
+  generationConfig,
+  onGenerationConfigChange,
+  onTrainingConfigChange,
+  trainingConfig,
+}: {
+  generationConfig: GenerationConfig;
+  onGenerationConfigChange: (
+    config: GenerationConfig | ((current: GenerationConfig) => GenerationConfig),
+  ) => void;
+  onTrainingConfigChange: (
+    config: TrainingConfig | ((current: TrainingConfig) => TrainingConfig),
+  ) => void;
+  trainingConfig: TrainingConfig;
+}): TrainingControlField[] {
+  return [
+    {
+      kind: "select",
+      label: "Backend",
+      onChange: (value) =>
+        onTrainingConfigChange((current) => ({
+          ...current,
+          requestedBackend: value as TrainingConfig["requestedBackend"],
+        })),
+      options: [
+        { label: "Auto", value: "auto" },
+        { label: "WebGPU", value: "webgpu" },
+        { label: "CPU", value: "cpu" },
+      ],
+      value: trainingConfig.requestedBackend,
+    },
+    {
+      kind: "number",
+      label: "Seed",
+      onChange: (value) =>
+        onTrainingConfigChange((current) => ({
+          ...current,
+          seed: Math.max(1, value),
+        })),
+      step: 1,
+      value: trainingConfig.seed,
+    },
+    {
+      kind: "number",
+      label: "Steps",
+      onChange: (value) =>
+        onTrainingConfigChange((current) => ({
+          ...current,
+          steps: Math.max(1, value),
+        })),
+      step: 1,
+      value: trainingConfig.steps,
+    },
+    {
+      kind: "number",
+      label: "Batch size",
+      onChange: (value) =>
+        onTrainingConfigChange((current) => ({
+          ...current,
+          batchSize: Math.max(1, value),
+        })),
+      step: 1,
+      value: trainingConfig.batchSize,
+    },
+    {
+      kind: "number",
+      label: "Block size",
+      onChange: (value) =>
+        onTrainingConfigChange((current) => ({
+          ...current,
+          model: { ...current.model, blockSize: Math.max(1, value) },
+        })),
+      step: 1,
+      value: trainingConfig.model.blockSize,
+    },
+    {
+      kind: "number",
+      label: "Layers",
+      onChange: (value) =>
+        onTrainingConfigChange((current) => ({
+          ...current,
+          model: { ...current.model, nLayer: Math.max(1, value) },
+        })),
+      step: 1,
+      value: trainingConfig.model.nLayer,
+    },
+    {
+      kind: "number",
+      label: "Embedding width",
+      onChange: (value) =>
+        onTrainingConfigChange((current) => ({
+          ...current,
+          model: { ...current.model, nEmbd: Math.max(1, value) },
+        })),
+      step: 1,
+      value: trainingConfig.model.nEmbd,
+    },
+    {
+      kind: "number",
+      label: "Attention heads",
+      onChange: (value) =>
+        onTrainingConfigChange((current) => ({
+          ...current,
+          model: { ...current.model, nHead: Math.max(1, value) },
+        })),
+      step: 1,
+      value: trainingConfig.model.nHead,
+    },
+    {
+      kind: "number",
+      label: "Learning rate",
+      onChange: (value) =>
+        onTrainingConfigChange((current) => ({
+          ...current,
+          learningRate: Math.max(0.0000001, value),
+        })),
+      step: 0.0001,
+      value: trainingConfig.learningRate,
+    },
+    {
+      kind: "number",
+      label: "Weight decay",
+      onChange: (value) =>
+        onTrainingConfigChange((current) => ({
+          ...current,
+          weightDecay: Math.max(0, value),
+        })),
+      step: 0.001,
+      value: trainingConfig.weightDecay,
+    },
+    {
+      kind: "number",
+      label: "Samples after train",
+      onChange: (value) =>
+        onGenerationConfigChange((current) =>
+          createGenerationConfig({
+            ...current,
+            numSamples: Math.max(1, value),
+          }),
+        ),
+      step: 1,
+      value: generationConfig.numSamples,
+    },
+    {
+      kind: "number",
+      label: "Default temperature",
+      onChange: (value) =>
+        onGenerationConfigChange((current) =>
+          createGenerationConfig({
+            ...current,
+            temperature: Math.min(1.4, Math.max(0.4, Number(value.toFixed(1)))),
+          }),
+        ),
+      step: 0.1,
+      value: generationConfig.temperature,
+    },
+  ];
 }
 
 function LabeledNumberField({

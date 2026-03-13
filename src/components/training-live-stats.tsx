@@ -1,5 +1,6 @@
 import { Liveline, type LivelinePoint } from "liveline";
-import { useMemo, useState } from "react";
+import { type MutableRefObject, useMemo, useRef, useState } from "react";
+import { StatCard } from "@/components/stat-card";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Group } from "@/components/ui/group";
@@ -9,11 +10,19 @@ import {
   ProgressLabel,
   ProgressTrack,
 } from "@/components/ui/progress";
+import { useAppTheme } from "@/lib/app-theme";
 import type { TrainingRunRecord } from "@/lib/trainer-types";
-import { getLatestTrainingTelemetry } from "@/lib/training-telemetry";
+import {
+  getLatestTrainingTelemetry,
+  resolveTrainingTelemetryTimeline,
+} from "@/lib/training-telemetry";
 import { useAnimatedValue } from "@/lib/use-animated-value";
 
 type TrainingMetricKey = "loss" | "stepsPerSecond" | "tokPerSecond";
+type ChartTelemetryPoint = {
+  elapsedTimeSeconds?: number;
+  time: number;
+};
 
 const METRIC_OPTIONS: Array<{
   accent: string;
@@ -27,12 +36,12 @@ const METRIC_OPTIONS: Array<{
   },
   {
     accent: "#2f8f5b",
-    label: "Throughput",
+    label: "Tokens/s",
     valueKey: "tokPerSecond",
   },
   {
     accent: "#3a76f0",
-    label: "Step rate",
+    label: "Steps/s",
     valueKey: "stepsPerSecond",
   },
 ];
@@ -49,24 +58,51 @@ export function TrainingLiveStats({
   isTraining: boolean;
   run: TrainingRunRecord | null;
 }) {
+  const theme = useAppTheme();
+  const frozenChartAnchorRef = useRef<{
+    anchorSeconds: number;
+    runId: string | null;
+    updatedAt: number;
+  } | null>(null);
   const [selectedMetric, setSelectedMetric] = useState<TrainingMetricKey>("loss");
   const [selectedWindowSeconds, setSelectedWindowSeconds] = useState<number>(300);
   const telemetry = run?.telemetry ?? [];
+  const normalizedTelemetry = useMemo(
+    () => resolveTrainingTelemetryTimeline(telemetry),
+    [telemetry],
+  );
   const fallbackPoint = useMemo(() => getCheckpointFallbackPoint(run), [run]);
+  const chartPoints = useMemo(
+    () =>
+      normalizedTelemetry.length > 0 ? normalizedTelemetry : fallbackPoint ? [fallbackPoint] : [],
+    [fallbackPoint, normalizedTelemetry],
+  );
   const latestPoint = useMemo(
-    () => getLatestTrainingTelemetry(telemetry) ?? fallbackPoint,
-    [fallbackPoint, telemetry],
+    () => getLatestTrainingTelemetry(normalizedTelemetry) ?? fallbackPoint,
+    [fallbackPoint, normalizedTelemetry],
   );
   const metricOption = METRIC_OPTIONS.find((option) => option.valueKey === selectedMetric);
+  const latestElapsedSeconds = latestPoint?.elapsedTimeSeconds ?? 0;
+  const chartLatestWallClockSeconds = getChartLatestWallClockSeconds({
+    anchorRef: frozenChartAnchorRef,
+    isTraining,
+    latestPoint,
+    run,
+  });
+  const chartTimeOriginSeconds = useMemo(
+    () => chartLatestWallClockSeconds - latestElapsedSeconds,
+    [chartLatestWallClockSeconds, latestElapsedSeconds],
+  );
   const chartData = useMemo(
     () =>
-      (telemetry.length > 0 ? telemetry : fallbackPoint ? [fallbackPoint] : []).map((point) => ({
-        time: point.time,
+      chartPoints.map((point) => ({
+        time: chartTimeOriginSeconds + (point.elapsedTimeSeconds ?? 0),
         value: point[selectedMetric],
       })),
-    [fallbackPoint, selectedMetric, telemetry],
+    [chartPoints, chartTimeOriginSeconds, selectedMetric],
   );
   const chartValue = latestPoint?.[selectedMetric] ?? 0;
+  const chartKey = `${run?.id ?? "no-run"}:${normalizedTelemetry.length > 0 ? "telemetry" : "fallback"}:${selectedMetric}:${selectedWindowSeconds}:${theme.resolvedTheme}`;
   const progressValue = latestPoint
     ? Math.min(100, (latestPoint.step / Math.max(latestPoint.totalSteps, 1)) * 100)
     : 0;
@@ -77,7 +113,7 @@ export function TrainingLiveStats({
       ? "Training in progress."
       : latestPoint
         ? "Recent training history for this dataset."
-        : "Start training to see live loss and throughput.";
+        : "Start training to see live loss, token throughput, and step rate.";
   const animatedStep = useAnimatedValue(latestPoint?.step ?? 0, { enabled: animating });
   const animatedLoss = useAnimatedValue(latestPoint?.loss ?? 0, { enabled: animating });
   const animatedTokPerSecond = useAnimatedValue(latestPoint?.tokPerSecond ?? 0, {
@@ -96,7 +132,7 @@ export function TrainingLiveStats({
     { label: "Loss", value: formatLossValue(animatedLoss) },
     { label: "Tokens/s", value: formatRateValue(animatedTokPerSecond) },
     { label: "Steps/s", value: formatRateValue(animatedStepsPerSecond) },
-    { label: "Tokens processed", value: formatCountValue(Math.floor(animatedTotalTokens)) },
+    { label: "Tokens processed", value: formatCountValue(animatedTotalTokens) },
   ];
 
   return (
@@ -159,18 +195,20 @@ export function TrainingLiveStats({
               <EmptyHeader>
                 <EmptyTitle>No Training History Yet</EmptyTitle>
                 <EmptyDescription>
-                  Start training to see loss and throughput over time.
+                  Start training to see loss, token throughput, and step rate over time.
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
           ) : (
             <div className="h-56 bg-muted/20">
               <Liveline
+                key={chartKey}
                 data={chartData as LivelinePoint[]}
                 value={chartValue}
                 badgeVariant="minimal"
                 color={metricOption?.accent ?? "#eb6f36"}
                 emptyText="Waiting for telemetry"
+                formatTime={(time) => formatElapsedChartTime(time - chartTimeOriginSeconds)}
                 formatValue={(value) => formatMetricValue(selectedMetric, value)}
                 loading={isTraining && chartData.length === 0}
                 padding={{ bottom: 32, left: 12, right: 88, top: 14 }}
@@ -178,7 +216,7 @@ export function TrainingLiveStats({
                 pulse={isTraining && !isComplete}
                 scrub={!isTraining || chartData.length > 1}
                 showValue
-                theme="light"
+                theme={theme.resolvedTheme}
                 valueMomentumColor={selectedMetric !== "loss"}
                 window={selectedWindowSeconds}
               />
@@ -186,15 +224,6 @@ export function TrainingLiveStats({
           )}
         </div>
       </section>
-    </div>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-border/70 bg-background px-4 py-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 font-semibold text-lg">{value}</div>
     </div>
   );
 }
@@ -233,6 +262,7 @@ function getCheckpointFallbackPoint(run: TrainingRunRecord | null) {
   }
 
   return {
+    elapsedTimeSeconds: checkpoint.resumeState.elapsedTrainingSeconds ?? 0,
     loss: checkpoint.resumeState.finalLoss,
     step: checkpoint.resumeState.completedSteps,
     stepsPerSecond: 0,
@@ -243,10 +273,67 @@ function getCheckpointFallbackPoint(run: TrainingRunRecord | null) {
   };
 }
 
+function formatElapsedChartTime(seconds: number) {
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainingSeconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function getChartLatestWallClockSeconds({
+  anchorRef,
+  isTraining,
+  latestPoint,
+  run,
+}: {
+  anchorRef: MutableRefObject<{
+    anchorSeconds: number;
+    runId: string | null;
+    updatedAt: number;
+  } | null>;
+  isTraining: boolean;
+  latestPoint: ChartTelemetryPoint | null;
+  run: TrainingRunRecord | null;
+}) {
+  if (!latestPoint) {
+    anchorRef.current = null;
+    return 0;
+  }
+
+  if (isTraining) {
+    anchorRef.current = null;
+    return latestPoint.time;
+  }
+
+  const runId = run?.id ?? null;
+  const updatedAt = run?.updatedAt ?? 0;
+  const cachedAnchor = anchorRef.current;
+  if (cachedAnchor && cachedAnchor.runId === runId && cachedAnchor.updatedAt === updatedAt) {
+    return cachedAnchor.anchorSeconds;
+  }
+
+  const nextAnchorSeconds = Date.now() / 1000;
+  anchorRef.current = {
+    anchorSeconds: nextAnchorSeconds,
+    runId,
+    updatedAt,
+  };
+  return nextAnchorSeconds;
+}
+
 function formatCountValue(value?: number) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return "—";
   }
 
-  return value.toLocaleString("en-US");
+  return value.toLocaleString("en-US", {
+    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
+  });
 }

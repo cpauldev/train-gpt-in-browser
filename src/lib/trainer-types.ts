@@ -1,5 +1,3 @@
-import type React from "react";
-
 export type BuiltInDatasetKey = "english_words" | "us_baby_names";
 export type WorkspaceFileSource = "builtin" | "user";
 export type TrainingRunStatus = "idle" | "training" | "completed" | "error";
@@ -53,6 +51,14 @@ export type DatasetStats = {
   vocabSize: number;
 };
 
+export type DatasetTextSummary = {
+  characterCount: number;
+  documents: string[];
+  lineCount: number;
+  tokenCount: number;
+  vocabSize: number;
+};
+
 export type WorkspaceFile = {
   builtInKey?: BuiltInDatasetKey;
   content: string;
@@ -96,6 +102,7 @@ export type OptimizerStateSnapshot = {
 
 export type ResumeStateSnapshot = {
   completedSteps: number;
+  elapsedTrainingSeconds?: number;
   finalLoss: number;
   lastSavedAt: number;
   totalTokens: number;
@@ -129,6 +136,7 @@ export type LogEntry = {
 export type GeneratedResultsByTemperature = Record<string, string[]>;
 
 export type TrainingTelemetryPoint = {
+  elapsedTimeSeconds?: number;
   loss: number;
   step: number;
   stepsPerSecond: number;
@@ -149,6 +157,7 @@ export type ArtifactFileSummary = {
 export type TrainingRunRecord = {
   artifacts?: Partial<Record<DownloadableArtifactKind, ArtifactFileSummary>>;
   checkpoint?: SerializedCheckpoint;
+  checkpointSavedAt?: number;
   createdAt: number;
   datasetStats: DatasetStats;
   fileId: string;
@@ -251,12 +260,15 @@ export type TrainerEvent =
       type: "resetComplete";
     }
   | {
-      checkpoint: SerializedCheckpoint;
+      checkpointSavedAt: number;
+      datasetStats: DatasetStats;
       runId: string;
       type: "trainingCheckpoint";
     }
   | {
-      checkpoint: SerializedCheckpoint;
+      checkpointSavedAt: number;
+      datasetStats: DatasetStats;
+      elapsedSeconds: number;
       generatedResults: string[];
       runId: string;
       temperatureKey: string;
@@ -278,28 +290,6 @@ export type TrainerEvent =
       runId: string;
       type: "trainingStarted";
     };
-
-export type TrainingControlsProps = {
-  disabled?: boolean;
-  generationConfig: GenerationConfig;
-  onGenerationConfigChange: (config: GenerationConfig) => void;
-  onTrainingConfigChange: (config: TrainingConfig) => void;
-  trainingConfig: TrainingConfig;
-};
-
-export type DetailItemAction = {
-  href?: string;
-  icon?: React.ReactNode;
-  label: string;
-  onClick?: () => void;
-};
-
-export type DetailItem = {
-  actions?: DetailItemAction[];
-  helpText?: string;
-  label: string;
-  value: string;
-};
 
 export function swigluHiddenDim(nEmbd: number) {
   return Math.max(1, Math.floor((8 * nEmbd) / 3));
@@ -352,4 +342,46 @@ export function getTrainingRunStatusBadgeVariant(status: TrainingRunStatus) {
 
 export function hasTrainingRun(runs: Array<Pick<TrainingRunRecord, "status">>) {
   return runs.some((run) => run.status === "training");
+}
+
+export function getTrainingRunCompletedSteps(
+  run: Pick<TrainingRunRecord, "checkpoint" | "telemetry">,
+) {
+  const checkpointSteps = run.checkpoint?.resumeState.completedSteps ?? 0;
+  const telemetrySteps = run.telemetry.at(-1)?.step ?? 0;
+  return Math.max(checkpointSteps, telemetrySteps);
+}
+
+export function resolveTrainingRunResumeTargetSteps(
+  run: Pick<TrainingRunRecord, "checkpoint" | "status" | "telemetry" | "trainingConfig">,
+  requestedSteps = run.trainingConfig.steps,
+) {
+  const completedSteps = getTrainingRunCompletedSteps(run);
+  const storedTargetSteps = run.trainingConfig.steps;
+
+  if (run.status === "completed" || completedSteps >= storedTargetSteps) {
+    return completedSteps + requestedSteps;
+  }
+
+  return Math.max(storedTargetSteps, requestedSteps, completedSteps);
+}
+
+export function canResumeTrainingRun(
+  run: Pick<
+    TrainingRunRecord,
+    "checkpoint" | "checkpointSavedAt" | "status" | "telemetry" | "trainingConfig"
+  >,
+  requestedSteps = run.trainingConfig.steps,
+) {
+  if (run.status === "training") {
+    return false;
+  }
+
+  if (!run.checkpoint && !run.checkpointSavedAt) {
+    return false;
+  }
+
+  return (
+    resolveTrainingRunResumeTargetSteps(run, requestedSteps) > getTrainingRunCompletedSteps(run)
+  );
 }
