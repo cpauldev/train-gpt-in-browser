@@ -94,6 +94,7 @@ describe("TrainingLiveStats", () => {
     expect(screen.getByRole("button", { name: "Loss" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Tokens/s" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Steps/s" })).toBeTruthy();
+    expect(screen.getByText("2 / 100 (2%)")).toBeTruthy();
   });
 
   it("remounts the chart when switching metrics so completed runs show the correct series", async () => {

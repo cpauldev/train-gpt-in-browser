@@ -1,7 +1,7 @@
+import { useState } from "react";
 import { RunPanel } from "@/components/run-panel";
 import { SidebarEditorView } from "@/components/sidebar-editor-view";
 import { SidebarListView } from "@/components/sidebar-list-view";
-import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -12,12 +12,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-media-query";
 import { useAppTheme } from "@/lib/app-theme";
 import { useBrowserTrainer } from "@/lib/use-browser-trainer";
+import { useTrainingPageTitle } from "@/lib/use-training-page-title";
 import { useWorkspaceEditor } from "@/lib/use-workspace-editor";
-import { useState } from "react";
 
 const REPO_URL = "https://github.com/cpauldev/train-gpt-in-browser";
 
@@ -27,6 +28,10 @@ export default function App() {
   const trainer = useBrowserTrainer();
   const workspaceEditor = useWorkspaceEditor(trainer);
   const [mobileTab, setMobileTab] = useState<"run" | "workspace">("run");
+  useTrainingPageTitle({
+    fileTitle: trainer.workspace.selectedFile?.title ?? trainer.workspace.selectedFile?.name,
+    run: trainer.runs.active,
+  });
 
   const workspacePanel = workspaceEditor.isEditorOpen ? (
     <SidebarEditorView {...workspaceEditor.editorViewProps} />
@@ -69,9 +74,7 @@ export default function App() {
               <section className="grid min-h-0 flex-1 gap-6 lg:grid-cols-2 lg:overflow-hidden">
                 <section className="overflow-hidden lg:h-full lg:min-h-0">{runPanel}</section>
 
-                <section className="overflow-hidden lg:h-full lg:min-h-0">
-                  {workspacePanel}
-                </section>
+                <section className="overflow-hidden lg:h-full lg:min-h-0">{workspacePanel}</section>
               </section>
             )}
           </div>

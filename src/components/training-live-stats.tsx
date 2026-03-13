@@ -130,7 +130,7 @@ export function TrainingLiveStats({
   const displayedStepsPerSecond = latestPoint ? animatedStepsPerSecond : undefined;
   const displayedTotalTokens = latestPoint ? animatedTotalTokens : undefined;
   const progressLabel = latestPoint
-    ? `${Math.floor(animatedStep).toLocaleString("en-US")} / ${latestPoint.totalSteps.toLocaleString("en-US")}`
+    ? formatProgressLabel(Math.floor(animatedStep), latestPoint.totalSteps)
     : "Waiting to start";
   const statCards = [
     { label: "Loss", value: formatLossValue(displayedLoss) },
@@ -340,4 +340,11 @@ function formatCountValue(value?: number) {
     maximumFractionDigits: 0,
     minimumFractionDigits: 0,
   });
+}
+
+function formatProgressLabel(step: number, totalSteps: number) {
+  const safeStep = Math.max(0, step);
+  const safeTotalSteps = Math.max(totalSteps, 1);
+  const percent = Math.min(100, Math.max(0, Math.round((safeStep / safeTotalSteps) * 100)));
+  return `${safeStep.toLocaleString("en-US")} / ${safeTotalSteps.toLocaleString("en-US")} (${percent}%)`;
 }

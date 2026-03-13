@@ -1,7 +1,7 @@
 {
-  "name": "DreamPhraseGPT Browser Trainer",
-  "short_name": "DreamPhraseGPT",
-  "description": "Train and resume DreamPhraseGPT runs offline in the browser and export .model files.",
+  "name": "Train GPT in Browser",
+  "short_name": "Train GPT",
+  "description": "Train a small character-level GPT offline in your browser, resume local runs, and export DreamPhraseGPT-compatible .model files.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

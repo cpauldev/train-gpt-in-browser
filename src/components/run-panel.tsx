@@ -251,10 +251,10 @@ function HeroPanelFrame({
                         href={repoUrl}
                         target="_blank"
                         rel="noreferrer"
-                        aria-label="Open repository"
+                        aria-label="View repository on GitHub"
                       >
                         <Github />
-                        Repo
+                        View on GitHub
                         <ArrowUpRight />
                       </a>
                     }
@@ -274,8 +274,8 @@ function HeroPanelFrame({
                     <span className="font-semibold text-sm">cpauldev/train-gpt-in-browser</span>
                   </div>
                   <p className="text-xs leading-5 text-muted-foreground">
-                    Train a small GPT model directly in your browser. No server required and built
-                    around local checkpoints.
+                    Train a character-level GPT entirely in your browser. Learn from datasets,
+                    generate new strings, resume checkpoints, and export models.
                   </p>
                   <a
                     href={repoUrl}
