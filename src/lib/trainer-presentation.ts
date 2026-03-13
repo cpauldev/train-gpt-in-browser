@@ -1,5 +1,4 @@
 export type WorkspaceRuntimeStatus = {
-  badgeVariant: "info" | "success" | "warning";
   dotClass: string;
   label: string;
   storageLabel: string;
@@ -12,7 +11,6 @@ export function getWorkspaceRuntimeStatus(
 ): WorkspaceRuntimeStatus {
   if (workerReady && !hydrating) {
     return {
-      badgeVariant: "success",
       dotClass: "bg-green-500",
       label: "Runtime ready",
       storageLabel: "Ready",
@@ -22,7 +20,6 @@ export function getWorkspaceRuntimeStatus(
 
   if (workerReady) {
     return {
-      badgeVariant: "info",
       dotClass: "bg-blue-500",
       label: "Loading data",
       storageLabel: "Loading",
@@ -31,7 +28,6 @@ export function getWorkspaceRuntimeStatus(
   }
 
   return {
-    badgeVariant: "warning",
     dotClass: "bg-yellow-500",
     label: "Starting runtime",
     storageLabel: "Loading",
@@ -56,10 +52,6 @@ export function formatDurationSeconds(totalSeconds: number): string {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
-}
-
-export function formatEtaSeconds(totalSeconds: number): string {
-  return formatDurationSeconds(totalSeconds);
 }
 
 export function formatBytes(value: number): string {

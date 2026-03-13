@@ -138,16 +138,17 @@ export async function saveWorkspaceFile(file: WorkspaceFile) {
 }
 
 export async function createWorkspaceFile(name: string, content = "") {
+  const db = await getTrainerDb();
   const now = Date.now();
   const file: WorkspaceFile = {
     content,
     createdAt: now,
     id: createId("file"),
-    name: normalizeTextFileName(name),
+    name: await resolveUniqueUserTextFileName(db, name),
     source: "user",
     updatedAt: now,
   };
-  await saveWorkspaceFile(file);
+  await db.put("files", file);
   return file;
 }
 
@@ -181,11 +182,22 @@ export async function updateWorkspaceFileContent(fileId: string, content: string
 }
 
 export async function renameWorkspaceFile(fileId: string, name: string) {
-  return updateStoredWorkspaceFile(fileId, (file) => ({
+  const db = await getTrainerDb();
+  const file = await db.get("files", fileId);
+  if (!file) {
+    throw new Error(`Workspace file not found: ${fileId}`);
+  }
+
+  const updated: WorkspaceFile = {
     ...file,
-    name: normalizeTextFileName(name),
+    name:
+      file.source === "user"
+        ? await resolveUniqueUserTextFileName(db, name, { ignoreFileId: fileId })
+        : file.name,
     updatedAt: Date.now(),
-  }));
+  };
+  await db.put("files", updated);
+  return updated;
 }
 
 export async function deleteWorkspaceFile(fileId: string) {
@@ -193,7 +205,7 @@ export async function deleteWorkspaceFile(fileId: string) {
   await db.delete("files", fileId);
 }
 
-export async function listTrainingRuns() {
+export async function listTrainingRuns(): Promise<TrainingRunRecord[]> {
   const db = await getTrainerDb();
   const persistedRuns = await db.getAll("runs");
   const nextRuns = await Promise.all(
@@ -202,7 +214,7 @@ export async function listTrainingRuns() {
   return nextRuns.sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
-export async function getTrainingRun(runId: string) {
+export async function getTrainingRun(runId: string): Promise<TrainingRunRecord | undefined> {
   const db = await getTrainerDb();
   const run = await db.get("runs", runId);
   if (!run) {
@@ -258,14 +270,18 @@ export async function saveTrainingRunArtifacts(
   );
   const nextRun = attachArtifactSummaries(run, storedArtifacts);
   const transaction = db.transaction(["runs", "artifacts"], "readwrite");
+  try {
+    await transaction.objectStore("runs").put(stripCheckpoint(nextRun));
+    for (const artifact of storedArtifacts) {
+      await transaction.objectStore("artifacts").put(artifact);
+    }
 
-  await transaction.objectStore("runs").put(stripCheckpoint(nextRun));
-  for (const artifact of storedArtifacts) {
-    await transaction.objectStore("artifacts").put(artifact);
+    await transaction.done;
+    return nextRun;
+  } catch (error) {
+    await Promise.all(storedArtifacts.map(deleteStoredArtifactFile));
+    throw error;
   }
-
-  await transaction.done;
-  return nextRun;
 }
 
 export async function getTrainingRunArtifact(runId: string, kind: RunArtifactKind) {
@@ -358,20 +374,22 @@ export async function resetTrainerStorage() {
 async function inflatePersistedRun(
   db: IDBPDatabase<TrainerDbSchema>,
   persistedRun: PersistedTrainingRunRecord,
-) {
+): Promise<TrainingRunRecord> {
   const hydratedRun = hydratePersistedRunShape(persistedRun);
 
   const checkpointRecord = await db.get("checkpoints", hydratedRun.id);
   if (checkpointRecord?.checkpoint) {
-    return {
+    const run: TrainingRunRecord = {
       ...hydratedRun,
       checkpoint: cloneCheckpoint(checkpointRecord.checkpoint),
-    } satisfies TrainingRunRecord;
+    };
+    return run;
   }
 
-  return {
+  const run: TrainingRunRecord = {
     ...hydratedRun,
-  } satisfies TrainingRunRecord;
+  };
+  return run;
 }
 
 function artifactSetToList(artifactSet: RunArtifactSet) {
@@ -640,4 +658,31 @@ function buildArtifactId(runId: string, kind: RunArtifactKind) {
 function normalizeTextFileName(name: string) {
   const trimmed = name.trim() || "dataset";
   return trimmed.toLowerCase().endsWith(".txt") ? trimmed : `${trimmed}.txt`;
+}
+
+async function resolveUniqueUserTextFileName(
+  db: IDBPDatabase<TrainerDbSchema>,
+  name: string,
+  options?: { ignoreFileId?: string },
+) {
+  const normalizedName = normalizeTextFileName(name);
+  const existingNames = new Set(
+    (await db.getAll("files"))
+      .filter((file) => file.source === "user" && file.id !== options?.ignoreFileId)
+      .map((file) => file.name),
+  );
+
+  if (!existingNames.has(normalizedName)) {
+    return normalizedName;
+  }
+
+  const stem = normalizedName.replace(/\.txt$/iu, "");
+  let suffix = 2;
+  let candidate = `${stem}-${suffix}.txt`;
+  while (existingNames.has(candidate)) {
+    suffix += 1;
+    candidate = `${stem}-${suffix}.txt`;
+  }
+
+  return candidate;
 }

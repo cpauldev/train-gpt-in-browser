@@ -7,6 +7,9 @@ type BrowserTrainer = import("@/lib/trainer-runtime").BrowserTrainer;
 
 let activeRunId: string | null = null;
 let activeTrainer: BrowserTrainer | null = null;
+let activeTrainingAbortController: AbortController | null = null;
+let activeTrainingPromise: Promise<void> | null = null;
+let activeTrainingSessionId = 0;
 let trainerRuntimePromise: Promise<typeof import("@/lib/trainer-runtime")> | null = null;
 let trainerStoragePromise: Promise<typeof import("@/lib/trainer-storage")> | null = null;
 
@@ -14,6 +17,9 @@ self.addEventListener("message", async (event: MessageEvent<TrainerCommand>) => 
   try {
     await handleCommand(event.data);
   } catch (error) {
+    if (isAbortError(error)) {
+      return;
+    }
     postMessageSafe({
       message: error instanceof Error ? error.message : "Unknown worker error.",
       runId: getRunId(event.data),
@@ -27,21 +33,21 @@ postMessageSafe({ type: "ready" });
 async function handleCommand(command: TrainerCommand) {
   switch (command.type) {
     case "startTraining": {
-      disposeActiveTrainer();
+      await stopActiveTrainer();
       activeRunId = command.runId;
       activeTrainer = await createNewTrainer(command.file, command.trainingConfig);
       await startTraining(activeTrainer, command.runId, command.generationConfig);
       return;
     }
     case "resumeTraining": {
-      disposeActiveTrainer();
+      await stopActiveTrainer();
       activeRunId = command.runId;
       activeTrainer = await createTrainerFromCheckpoint(command.checkpoint, command.trainingConfig);
       await startTraining(activeTrainer, command.runId, command.generationConfig);
       return;
     }
     case "loadRun": {
-      disposeActiveTrainer();
+      await stopActiveTrainer();
       activeRunId = command.runId;
       activeTrainer = await createTrainerFromCheckpoint(command.checkpoint);
       return;
@@ -63,14 +69,15 @@ async function handleCommand(command: TrainerCommand) {
     }
     case "deleteRun": {
       if (activeRunId === command.runId) {
-        disposeActiveTrainer();
+        await stopActiveTrainer();
       }
       return;
     }
     case "resetAll": {
-      disposeActiveTrainer();
+      const runId = activeRunId ?? "reset";
+      await stopActiveTrainer();
       postMessageSafe({
-        runId: activeRunId ?? "reset",
+        runId,
         type: "resetComplete",
       });
       return;
@@ -87,76 +94,100 @@ async function startTraining(
   runId: string,
   generationConfig: GenerationConfig,
 ) {
-  postMessageSafe({
+  const sessionId = ++activeTrainingSessionId;
+  const abortController = new AbortController();
+  activeTrainingAbortController = abortController;
+
+  postTrainingEvent(sessionId, abortController.signal, {
     logEntry: createLogEntry("Training session started.", "success"),
     resolvedBackend: trainer.getResolvedBackend(),
     runId,
     type: "trainingStarted",
   });
 
-  await trainer.train({
-    generationConfig,
-    onProgress: async (summary, isAutosave) => {
-      if (summary.generatedResults) {
-        if (!summary.checkpoint) {
-          throw new Error("Training completed without a checkpoint payload.");
+  const trainingPromise = trainer
+    .train({
+      generationConfig,
+      onProgress: async (summary, isAutosave) => {
+        if (summary.generatedResults) {
+          if (!summary.checkpoint) {
+            throw new Error("Training completed without a checkpoint payload.");
+          }
+
+          await persistTrainingCheckpoint(runId, summary.checkpoint);
+          postTrainingEvent(sessionId, abortController.signal, {
+            checkpointSavedAt: summary.checkpoint.exportedAt,
+            datasetStats: summary.checkpoint.datasetStats,
+            elapsedSeconds: summary.elapsedSeconds,
+            generatedResults: summary.generatedResults,
+            runId,
+            temperatureKey: generationConfig.temperature.toFixed(1),
+            type: "trainingCompleted",
+          });
+          postTrainingEvent(sessionId, abortController.signal, {
+            logEntry: summary.logEntry,
+            runId,
+            type: "log",
+          });
+          return;
         }
 
-        await persistTrainingCheckpoint(runId, summary.checkpoint);
-        postMessageSafe({
-          checkpointSavedAt: summary.checkpoint.exportedAt,
-          datasetStats: summary.checkpoint.datasetStats,
-          elapsedSeconds: summary.elapsedSeconds,
-          generatedResults: summary.generatedResults,
-          runId,
-          temperatureKey: generationConfig.temperature.toFixed(1),
-          type: "trainingCompleted",
-        });
-        postMessageSafe({
+        postTrainingEvent(sessionId, abortController.signal, {
           logEntry: summary.logEntry,
           runId,
-          type: "log",
+          type: "trainingProgress",
         });
+
+        if (isAutosave) {
+          if (!summary.checkpoint) {
+            throw new Error("Autosave was requested without a checkpoint payload.");
+          }
+
+          await persistTrainingCheckpoint(runId, summary.checkpoint);
+          postTrainingEvent(sessionId, abortController.signal, {
+            checkpointSavedAt: summary.checkpoint.exportedAt,
+            datasetStats: summary.checkpoint.datasetStats,
+            runId,
+            type: "trainingCheckpoint",
+          });
+        }
+      },
+      onStart: async (logEntries) => {
+        for (const logEntry of logEntries) {
+          postTrainingEvent(sessionId, abortController.signal, {
+            logEntry,
+            runId,
+            type: "log",
+          });
+        }
+      },
+      onTelemetry: async (point) => {
+        postTrainingEvent(sessionId, abortController.signal, {
+          point,
+          runId,
+          type: "trainingTelemetry",
+        });
+      },
+      signal: abortController.signal,
+    })
+    .then(() => {})
+    .catch((error) => {
+      if (isAbortError(error)) {
         return;
       }
-
-      postMessageSafe({
-        logEntry: summary.logEntry,
-        runId,
-        type: "trainingProgress",
-      });
-
-      if (isAutosave) {
-        if (!summary.checkpoint) {
-          throw new Error("Autosave was requested without a checkpoint payload.");
-        }
-
-        await persistTrainingCheckpoint(runId, summary.checkpoint);
-        postMessageSafe({
-          checkpointSavedAt: summary.checkpoint.exportedAt,
-          datasetStats: summary.checkpoint.datasetStats,
-          runId,
-          type: "trainingCheckpoint",
-        });
+      throw error;
+    })
+    .finally(() => {
+      if (activeTrainingPromise === trainingPromise) {
+        activeTrainingPromise = null;
       }
-    },
-    onStart: async (logEntries) => {
-      for (const logEntry of logEntries) {
-        postMessageSafe({
-          logEntry,
-          runId,
-          type: "log",
-        });
+      if (activeTrainingAbortController === abortController) {
+        activeTrainingAbortController = null;
       }
-    },
-    onTelemetry: async (point) => {
-      postMessageSafe({
-        point,
-        runId,
-        type: "trainingTelemetry",
-      });
-    },
-  });
+    });
+
+  activeTrainingPromise = trainingPromise;
+  await trainingPromise;
 }
 
 async function ensureActiveTrainer(
@@ -167,13 +198,25 @@ async function ensureActiveTrainer(
     return activeTrainer;
   }
 
-  disposeActiveTrainer();
+  await stopActiveTrainer();
   activeRunId = runId;
   activeTrainer = await createTrainerFromCheckpoint(checkpoint);
   return activeTrainer;
 }
 
-function disposeActiveTrainer() {
+async function stopActiveTrainer() {
+  const abortController = activeTrainingAbortController;
+  activeTrainingAbortController = null;
+  if (abortController) {
+    abortController.abort();
+  }
+
+  const trainingPromise = activeTrainingPromise;
+  if (trainingPromise) {
+    activeTrainingPromise = null;
+    await trainingPromise;
+  }
+
   activeTrainer?.dispose();
   activeTrainer = null;
   activeRunId = null;
@@ -185,6 +228,13 @@ function getRunId(command: TrainerCommand) {
 
 function postMessageSafe(event: TrainerEvent) {
   self.postMessage(event);
+}
+
+function postTrainingEvent(sessionId: number, signal: AbortSignal, event: TrainerEvent) {
+  if (signal.aborted || sessionId !== activeTrainingSessionId) {
+    return;
+  }
+  postMessageSafe(event);
 }
 
 async function loadTrainerRuntime() {
@@ -225,4 +275,8 @@ async function persistTrainingCheckpoint(
 ) {
   const { saveTrainingCheckpoint } = await loadTrainerStorage();
   await saveTrainingCheckpoint(runId, checkpoint);
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
 }

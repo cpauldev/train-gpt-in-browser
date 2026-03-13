@@ -121,4 +121,32 @@ describe("trainer-runtime", () => {
 
     trainer.dispose();
   }, 20000);
+
+  it("fails early when the embedding width is not divisible by the head count", async () => {
+    const trainingConfig: TrainingConfig = {
+      ...createTestTrainingConfig(),
+      model: createModelConfigFromDimensions({
+        blockSize: 4,
+        nEmbd: 8,
+        nHead: 2,
+        nLayer: 1,
+        vocabSize: 1,
+      }),
+    };
+    trainingConfig.model = {
+      ...trainingConfig.model,
+      nEmbd: 7,
+    };
+
+    await expect(
+      BrowserTrainer.createNew(
+        {
+          content: "alpha\nbeta\ngamma\ndelta\n",
+          id: "file-invalid",
+          name: "invalid.txt",
+        },
+        trainingConfig,
+      ),
+    ).rejects.toThrow("Embedding width must be divisible by attention head count.");
+  });
 });

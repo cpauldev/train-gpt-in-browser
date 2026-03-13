@@ -26,6 +26,7 @@ import type {
   TrainingTelemetryPoint,
   WorkspaceFile,
 } from "@/lib/trainer-types";
+import { validateModelConfig } from "@/lib/trainer-types";
 
 const RMS_NORM_EPSILON = 1e-5;
 const INIT_WEIGHT_STDDEV = 0.08;
@@ -114,6 +115,7 @@ export class BrowserTrainer {
     file: Pick<WorkspaceFile, "content" | "id" | "name">,
     trainingConfig: TrainingConfig,
   ) {
+    validateModelConfig(trainingConfig.model);
     const resolvedBackend = await resolveBackendPreference(trainingConfig.requestedBackend);
     const datasetRng = new DreamPhraseRng(trainingConfig.seed);
     const dataset = prepareDataset(file.content, trainingConfig.model.blockSize, datasetRng);
@@ -143,6 +145,7 @@ export class BrowserTrainer {
     checkpoint: SerializedCheckpoint,
     nextTrainingConfig = checkpoint.trainingConfig,
   ) {
+    validateModelConfig(checkpoint.modelConfig);
     const resolvedBackend = await resolveBackendPreference(nextTrainingConfig.requestedBackend);
     const tokenizer = checkpoint.tokenizer;
     const dataset: PreparedDataset = {
@@ -207,17 +210,19 @@ export class BrowserTrainer {
     });
   }
 
-  async generateSamples(generationConfig: GenerationConfig) {
+  async generateSamples(generationConfig: GenerationConfig, signal?: AbortSignal) {
     const results: string[] = [];
     const samplingRng = new DreamPhraseRng(
       (this.runtimeRng.snapshot() ^ Date.now() ^ generationConfig.numSamples) >>> 0,
     );
 
     for (let sampleIndex = 0; sampleIndex < generationConfig.numSamples; sampleIndex += 1) {
+      throwIfAborted(signal);
       let accepted: string | null = null;
 
       for (let attempt = 0; attempt < SOURCE_FILTER_MAX_RETRIES; attempt += 1) {
-        const candidate = await this.generateOneSample(generationConfig, samplingRng);
+        throwIfAborted(signal);
+        const candidate = await this.generateOneSample(generationConfig, samplingRng, signal);
         if (!candidate.trim()) {
           continue;
         }
@@ -244,12 +249,15 @@ export class BrowserTrainer {
     onProgress,
     onStart,
     onTelemetry,
+    signal,
   }: {
     generationConfig: GenerationConfig;
     onProgress: (summary: TrainingStepSummary, isAutosave: boolean) => Promise<void> | void;
     onStart?: (logEntries: LogEntry[]) => Promise<void> | void;
     onTelemetry?: (point: TrainingTelemetryPoint) => Promise<void> | void;
+    signal?: AbortSignal;
   }) {
+    throwIfAborted(signal);
     const parameterCount = countParameters(this.model.ordered);
     const completedStepsBefore = this.resumeState.completedSteps;
     const totalTokensBefore = this.resumeState.totalTokens;
@@ -267,6 +275,7 @@ export class BrowserTrainer {
     });
 
     if (onStart) {
+      throwIfAborted(signal);
       await onStart(startingLogEntries);
     }
 
@@ -280,6 +289,7 @@ export class BrowserTrainer {
     let lastTelemetryTokens = totalTokensBefore;
 
     for (let step = 0; step < remainingTrainingSteps; step += 1) {
+      throwIfAborted(signal);
       const learningRate =
         this.trainingConfig.learningRate *
         (1 - (completedStepsBefore + step) / Math.max(1, targetTotalSteps));
@@ -292,6 +302,7 @@ export class BrowserTrainer {
       );
 
       const loss = await this.applyTrainingStep(batch.x, batch.y, learningRate);
+      throwIfAborted(signal);
       batch.x.dispose();
       batch.y.dispose();
 
@@ -313,7 +324,9 @@ export class BrowserTrainer {
           totalSteps: targetTotalSteps,
           totalTokens,
         };
+        throwIfAborted(signal);
         await onTelemetry(telemetryPoint);
+        throwIfAborted(signal);
         lastTelemetryAt = now;
         lastTelemetrySteps = completedSteps;
         lastTelemetryTokens = totalTokens;
@@ -356,10 +369,13 @@ export class BrowserTrainer {
           totalSteps: targetTotalSteps,
           totalTokens,
         };
+        throwIfAborted(signal);
         await onProgress(summary, shouldAutosave);
+        throwIfAborted(signal);
       }
     }
 
+    throwIfAborted(signal);
     const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 1e-9);
     const totalElapsedTrainingSeconds = elapsedTrainingSecondsBefore + elapsedSeconds;
     const checkpoint = await this.getCheckpoint(
@@ -368,12 +384,14 @@ export class BrowserTrainer {
       finalLoss,
       totalElapsedTrainingSeconds,
     );
-    const generatedResults = await this.generateSamples(generationConfig);
+    throwIfAborted(signal);
+    const generatedResults = await this.generateSamples(generationConfig, signal);
     const completionEntry = createLogEntry(
       `Training finished in ${elapsedSeconds.toFixed(1)} seconds on ${this.resolvedBackend}.`,
       "success",
     );
 
+    throwIfAborted(signal);
     await onProgress(
       {
         checkpoint,
@@ -389,6 +407,7 @@ export class BrowserTrainer {
       },
       true,
     );
+    throwIfAborted(signal);
 
     return {
       checkpoint,
@@ -469,11 +488,16 @@ export class BrowserTrainer {
     return loss;
   }
 
-  private async generateOneSample(generationConfig: GenerationConfig, rng: DreamPhraseRng) {
+  private async generateOneSample(
+    generationConfig: GenerationConfig,
+    rng: DreamPhraseRng,
+    signal?: AbortSignal,
+  ) {
     const tokenIds = [this.dataset.tokenizer.bosId];
     const characters: string[] = [];
 
     for (let step = 0; step < generationConfig.requestedBlockSize; step += 1) {
+      throwIfAborted(signal);
       const window = tokenIds.slice(-generationConfig.requestedBlockSize);
       const logits = tf.tidy(() =>
         this.forward(tf.tensor2d(window, [1, window.length], "int32")).slice(
@@ -482,6 +506,7 @@ export class BrowserTrainer {
         ),
       );
       const values = Array.from(await logits.data());
+      throwIfAborted(signal);
       logits.dispose();
       const nextId = sampleLogitIndex(values, clampTemperature(generationConfig.temperature), rng);
 
@@ -959,4 +984,14 @@ function sampleLogitIndex(logits: number[], temperature: number, rng: DreamPhras
   }
 
   return weights.length - 1;
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  const error = new Error("Training was cancelled.");
+  error.name = "AbortError";
+  throw error;
 }

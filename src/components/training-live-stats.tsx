@@ -82,7 +82,7 @@ export function TrainingLiveStats({
   );
   const metricOption = METRIC_OPTIONS.find((option) => option.valueKey === selectedMetric);
   const latestElapsedSeconds = latestPoint?.elapsedTimeSeconds ?? 0;
-  const anchorKey = `${run?.id ?? ""}:${run?.updatedAt ?? 0}:${selectedMetric}:${selectedWindowSeconds}`;
+  const anchorKey = `${run?.id ?? ""}:${run?.updatedAt ?? 0}:${selectedMetric}:${selectedWindowSeconds}:${theme.resolvedTheme}`;
   const chartLatestWallClockSeconds = getChartLatestWallClockSeconds({
     anchorRef: frozenChartAnchorRef,
     anchorKey,

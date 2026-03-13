@@ -188,7 +188,7 @@ function HeroPanelFrame({
                 </FrameTitle>
               </div>
               <p
-                className={cn("text-white/80", mobile ? "text-sm leading-6" : "text-sm leading-6")}
+                className="text-sm leading-6 text-white/80"
                 style={{
                   animation: "fade-blur-up 0.6s ease-out both",
                   animationDelay: "720ms",

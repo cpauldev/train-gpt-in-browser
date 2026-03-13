@@ -9,6 +9,7 @@ import {
   getTrainingRunArtifact,
   listTrainingRuns,
   listWorkspaceFiles,
+  renameWorkspaceFile,
   resetTrainerStorage,
   saveTrainingCheckpoint,
   saveTrainingRun,
@@ -60,6 +61,16 @@ describe("trainer-storage", () => {
 
     expect(updated.name).toBe("ideas.txt");
     expect(updated.content).toBe("alpha\nbeta");
+  });
+
+  it("keeps user file names unique across create and rename operations", async () => {
+    const first = await createWorkspaceFile("ideas", "alpha");
+    const second = await createWorkspaceFile("ideas.txt", "beta");
+    const renamed = await renameWorkspaceFile(second.id, first.name);
+
+    expect(first.name).toBe("ideas.txt");
+    expect(second.name).toBe("ideas-2.txt");
+    expect(renamed.name).toBe("ideas-2.txt");
   });
 
   it("reuses an imported local file when the normalized name already exists", async () => {

@@ -31,8 +31,8 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { Toggle } from "@/components/ui/toggle";
-import { formatNumber } from "@/lib/trainer-core";
-import { formatEtaSeconds } from "@/lib/trainer-presentation";
+import { clampTemperature, formatNumber } from "@/lib/trainer-core";
+import { formatDurationSeconds } from "@/lib/trainer-presentation";
 import {
   createGenerationConfig,
   type DatasetTextSummary,
@@ -132,7 +132,7 @@ export function SidebarEditorView({
   const animatedEtaSeconds = useAnimatedValue(rawEtaSeconds ?? 0, {
     enabled: rawEtaSeconds !== null,
   });
-  const trainingEta = rawEtaSeconds !== null ? formatEtaSeconds(animatedEtaSeconds) : null;
+  const trainingEta = rawEtaSeconds !== null ? formatDurationSeconds(animatedEtaSeconds) : null;
   const trainingActionLabel = isTraining
     ? isFinalizingTraining
       ? "Finalizing results"
@@ -271,7 +271,10 @@ export function SidebarEditorView({
                         <Button
                           variant="outline"
                           onClick={() => onDownloadModel?.()}
-                          disabled={!selectedRun.checkpoint || selectedRun.status === "training"}
+                          disabled={
+                            (!selectedRun.checkpoint && !selectedRun.checkpointSavedAt) ||
+                            selectedRun.status === "training"
+                          }
                           className="w-full gap-2"
                         >
                           <Download className="size-4" />
@@ -627,7 +630,7 @@ function createTrainingControlFields({
         onGenerationConfigChange((current) =>
           createGenerationConfig({
             ...current,
-            temperature: Math.min(1.4, Math.max(0.4, Number(value.toFixed(1)))),
+            temperature: clampTemperature(value),
           }),
         ),
       step: 0.1,
@@ -655,7 +658,13 @@ function LabeledNumberField({
         nativeInput
         step={step}
         value={Number.isFinite(value) ? value : ""}
-        onChange={(event) => onChange(Number(event.currentTarget.value))}
+        onChange={(event) => {
+          const nextValue = event.currentTarget.valueAsNumber;
+          if (Number.isNaN(nextValue)) {
+            return;
+          }
+          onChange(nextValue);
+        }}
       />
     </Field>
   );

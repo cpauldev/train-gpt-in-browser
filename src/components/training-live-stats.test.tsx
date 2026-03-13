@@ -1,15 +1,17 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrainingLiveStats } from "@/components/training-live-stats";
 import { DEFAULT_TRAINING_CONFIG } from "@/lib/trainer-defaults";
 import type { TrainingRunRecord } from "@/lib/trainer-types";
 
+let mockResolvedTheme: "light" | "dark" = "light";
+
 vi.mock("@/lib/app-theme", () => ({
   useAppTheme: () => ({
     preference: "system",
-    resolvedTheme: "light",
+    resolvedTheme: mockResolvedTheme,
     resetPreference: vi.fn(),
     setPreference: vi.fn(),
   }),
@@ -80,6 +82,10 @@ function createRun(): TrainingRunRecord {
   };
 }
 
+afterEach(() => {
+  mockResolvedTheme = "light";
+});
+
 describe("TrainingLiveStats", () => {
   it("shows dashes before any training history exists", () => {
     render(<TrainingLiveStats isTraining={false} run={null} />);
@@ -137,6 +143,23 @@ describe("TrainingLiveStats", () => {
     // Data point times must be re-anchored to the new Date.now() (72s) so Liveline's
     // fresh clock matches the latest point and the elapsed timer stays correct.
     expect(screen.getByTestId("liveline").textContent).toBe("71:128|72:256:#2f8f5b:0:02");
+
+    dateNowSpy.mockRestore();
+  });
+
+  it("re-anchors completed-run data when the theme changes and remounts the chart", () => {
+    const dateNowSpy = vi.spyOn(Date, "now");
+    const run = createRun();
+
+    mockResolvedTheme = "light";
+    dateNowSpy.mockReturnValue(12_000);
+    const { rerender } = render(<TrainingLiveStats isTraining={false} run={run} />);
+    expect(screen.getByTestId("liveline").textContent).toBe("11:1.5|12:1.25:#eb6f36:0:02");
+
+    mockResolvedTheme = "dark";
+    dateNowSpy.mockReturnValue(72_000);
+    rerender(<TrainingLiveStats isTraining={false} run={run} />);
+    expect(screen.getByTestId("liveline").textContent).toBe("71:1.5|72:1.25:#eb6f36:0:02");
 
     dateNowSpy.mockRestore();
   });

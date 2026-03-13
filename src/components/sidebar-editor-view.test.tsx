@@ -198,6 +198,86 @@ describe("SidebarEditorView", () => {
     expect(screen.getByDisplayValue("english_words.txt").hasAttribute("disabled")).toBe(true);
   });
 
+  it("keeps the download button enabled when only checkpointSavedAt is present", () => {
+    const persistedRun: TrainingRunRecord = {
+      ...createRun(),
+      checkpoint: undefined,
+      checkpointSavedAt: Date.now(),
+    };
+
+    render(
+      <SidebarEditorView
+        canTrain
+        draftContent={selectedFile.content}
+        draftName={selectedFile.name}
+        generationConfig={DEFAULT_GENERATION_CONFIG}
+        isTraining={false}
+        onBack={vi.fn()}
+        onResetLocalData={vi.fn()}
+        onDownloadModel={vi.fn()}
+        onDraftContentChange={vi.fn()}
+        onDraftNameChange={vi.fn()}
+        onGenerationConfigChange={vi.fn()}
+        onStartTraining={vi.fn().mockResolvedValue(undefined)}
+        onTrainingConfigChange={vi.fn()}
+        selectedFile={selectedFile}
+        selectedFileSummary={{
+          characterCount: 9,
+          documents: ["alpha", "beta"],
+          lineCount: 2,
+          tokenCount: 11,
+          vocabSize: 8,
+        }}
+        selectedRun={persistedRun}
+        trainingConfig={DEFAULT_TRAINING_CONFIG}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /download model/i }).hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+
+  it("ignores invalid numeric input instead of writing NaN into training config", async () => {
+    const user = userEvent.setup();
+    const onTrainingConfigChange = vi.fn();
+
+    render(
+      <SidebarEditorView
+        canTrain
+        draftContent={selectedFile.content}
+        draftName={selectedFile.name}
+        generationConfig={DEFAULT_GENERATION_CONFIG}
+        isTraining={false}
+        onBack={vi.fn()}
+        onResetLocalData={vi.fn()}
+        onDraftContentChange={vi.fn()}
+        onDraftNameChange={vi.fn()}
+        onGenerationConfigChange={vi.fn()}
+        onStartTraining={vi.fn().mockResolvedValue(undefined)}
+        onTrainingConfigChange={onTrainingConfigChange}
+        selectedFile={selectedFile}
+        selectedFileSummary={{
+          characterCount: 9,
+          documents: ["alpha", "beta"],
+          lineCount: 2,
+          tokenCount: 11,
+          vocabSize: 8,
+        }}
+        selectedRun={createRun()}
+        trainingConfig={DEFAULT_TRAINING_CONFIG}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: /training/i }));
+    await user.click(screen.getByLabelText(/toggle training controls/i));
+    fireEvent.change(screen.getByDisplayValue(String(DEFAULT_TRAINING_CONFIG.seed)), {
+      target: { value: "-" },
+    });
+
+    expect(onTrainingConfigChange).not.toHaveBeenCalled();
+  });
+
   it("opens the live training stats automatically when the selected run starts training", async () => {
     const initialRun = createRun();
     const trainingRun: TrainingRunRecord = {

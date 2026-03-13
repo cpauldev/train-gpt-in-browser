@@ -208,67 +208,84 @@ export function useBrowserTrainer() {
     [activateRun, clearSelection, getRunForFile, persistActiveRunId, persistSelectedFileId],
   );
 
-  const hydrate = useCallback(async () => {
-    setBusyState((current) => ({ ...current, hydrating: true }));
-    telemetryPersistedAtRef.current.clear();
-    await seedBuiltinWorkspaceFiles();
+  const hydrate = useCallback(
+    async (options?: { suppressErrorToast?: boolean }) => {
+      setBusyState((current) => ({ ...current, hydrating: true }));
+      telemetryPersistedAtRef.current.clear();
+      try {
+        await seedBuiltinWorkspaceFiles();
 
-    const [nextFiles, persistedRuns, persistedActiveFileId, persistedActiveRunId] =
-      await Promise.all([
-        listWorkspaceFiles(),
-        listTrainingRuns(),
-        getActiveFileId(),
-        getActiveRunId(),
-      ]);
+        const [nextFiles, persistedRuns, persistedActiveFileId, persistedActiveRunId] =
+          await Promise.all([
+            listWorkspaceFiles(),
+            listTrainingRuns(),
+            getActiveFileId(),
+            getActiveRunId(),
+          ]);
 
-    const {
-      interruptedRunCount,
-      nextRuns: reconciledRuns,
-      updatedRuns,
-    } = reconcileInterruptedRuns(persistedRuns);
-    if (updatedRuns.length > 0) {
-      await Promise.all(updatedRuns.map((run) => saveTrainingRun(run)));
-    }
+        const {
+          interruptedRunCount,
+          nextRuns: reconciledRuns,
+          updatedRuns,
+        } = reconcileInterruptedRuns(persistedRuns);
+        if (updatedRuns.length > 0) {
+          await Promise.all(updatedRuns.map((run) => saveTrainingRun(run)));
+        }
 
-    const { duplicateRunIds, nextRuns } = dedupeRunsByFileId(reconciledRuns);
-    if (duplicateRunIds.length > 0) {
-      await Promise.all(duplicateRunIds.map((runId) => deleteTrainingRun(runId)));
-    }
+        const { duplicateRunIds, nextRuns } = dedupeRunsByFileId(reconciledRuns);
+        if (duplicateRunIds.length > 0) {
+          await Promise.all(duplicateRunIds.map((runId) => deleteTrainingRun(runId)));
+        }
 
-    const restoredSelection = resolveRestoredSelection({
-      activeFileId: persistedActiveFileId,
-      activeRunId: persistedActiveRunId,
-      files: nextFiles,
-      runs: nextRuns,
-    });
+        const restoredSelection = resolveRestoredSelection({
+          activeFileId: persistedActiveFileId,
+          activeRunId: persistedActiveRunId,
+          files: nextFiles,
+          runs: nextRuns,
+        });
 
-    commitFiles(nextFiles);
-    commitRuns(nextRuns);
-    setGenerationConfig(DEFAULT_GENERATION_CONFIG);
-    setTrainingConfig(DEFAULT_TRAINING_CONFIG);
+        commitFiles(nextFiles);
+        commitRuns(nextRuns);
+        setGenerationConfig(DEFAULT_GENERATION_CONFIG);
+        setTrainingConfig(DEFAULT_TRAINING_CONFIG);
 
-    persistSelectedFileId(restoredSelection.selectedFileId);
-    persistActiveRunId(restoredSelection.activeRunId);
+        persistSelectedFileId(restoredSelection.selectedFileId);
+        persistActiveRunId(restoredSelection.activeRunId);
 
-    const restoredRun = nextRuns.find((run) => run.id === restoredSelection.activeRunId) ?? null;
-    if (restoredRun) {
-      setTrainingConfig(restoredRun.trainingConfig);
-      loadRunIntoWorker(restoredRun);
-    }
+        const restoredRun =
+          nextRuns.find((run) => run.id === restoredSelection.activeRunId) ?? null;
+        if (restoredRun) {
+          setTrainingConfig(restoredRun.trainingConfig);
+          loadRunIntoWorker(restoredRun);
+        }
 
-    if (interruptedRunCount > 0) {
-      toastManager.add({
-        description:
-          interruptedRunCount === 1
-            ? "You can resume from your latest checkpoint."
-            : "You can resume any run from its latest checkpoint.",
-        title: interruptedRunCount === 1 ? "Run restored" : `${interruptedRunCount} runs restored`,
-        type: "warning",
-      });
-    }
-
-    setBusyState((current) => ({ ...current, hydrating: false }));
-  }, [commitFiles, commitRuns, loadRunIntoWorker, persistActiveRunId, persistSelectedFileId]);
+        if (interruptedRunCount > 0) {
+          toastManager.add({
+            description:
+              interruptedRunCount === 1
+                ? "You can resume from your latest checkpoint."
+                : "You can resume any run from its latest checkpoint.",
+            title:
+              interruptedRunCount === 1 ? "Run restored" : `${interruptedRunCount} runs restored`,
+            type: "warning",
+          });
+        }
+      } catch (error) {
+        if (!options?.suppressErrorToast) {
+          toastManager.add({
+            description:
+              error instanceof Error ? error.message : "The browser data couldn't be loaded.",
+            title: "Failed to load local data",
+            type: "error",
+          });
+        }
+        throw error;
+      } finally {
+        setBusyState((current) => ({ ...current, hydrating: false }));
+      }
+    },
+    [commitFiles, commitRuns, loadRunIntoWorker, persistActiveRunId, persistSelectedFileId],
+  );
 
   const replaceRun = useCallback(
     async (
@@ -566,7 +583,7 @@ export function useBrowserTrainer() {
     };
 
     worker.addEventListener("message", onMessage);
-    void hydrate();
+    void hydrate().catch(() => {});
 
     return () => {
       worker.removeEventListener("message", onMessage);
@@ -621,6 +638,14 @@ export function useBrowserTrainer() {
         commitFiles(await listWorkspaceFiles());
         await selectFileAndRun(lastImportedId);
         return accepted.length;
+      } catch (error) {
+        toastManager.add({
+          description:
+            error instanceof Error ? error.message : "The selected files couldn't be imported.",
+          title: "Import failed",
+          type: "error",
+        });
+        return 0;
       } finally {
         importInFlightRef.current = false;
         setBusyState((current) => ({ ...current, importing: false }));
@@ -1018,17 +1043,26 @@ export function useBrowserTrainer() {
 
   const resetAll = useCallback(async () => {
     setBusyState((current) => ({ ...current, generating: false, resetting: true }));
-    sendCommand({ type: "resetAll" });
-    await resetTrainerStorage();
-    await hydrate();
-    setTrainingConfig(DEFAULT_TRAINING_CONFIG);
-    setGenerationConfig(DEFAULT_GENERATION_CONFIG);
-    toastManager.add({
-      description: "Built-in datasets were restored.",
-      title: "Local data cleared",
-      type: "success",
-    });
-    setBusyState((current) => ({ ...current, resetting: false }));
+    try {
+      sendCommand({ type: "resetAll" });
+      await resetTrainerStorage();
+      await hydrate({ suppressErrorToast: true });
+      setTrainingConfig(DEFAULT_TRAINING_CONFIG);
+      setGenerationConfig(DEFAULT_GENERATION_CONFIG);
+      toastManager.add({
+        description: "Built-in datasets were restored.",
+        title: "Local data cleared",
+        type: "success",
+      });
+    } catch (error) {
+      toastManager.add({
+        description: error instanceof Error ? error.message : "The browser data couldn't be reset.",
+        title: "Reset failed",
+        type: "error",
+      });
+    } finally {
+      setBusyState((current) => ({ ...current, resetting: false }));
+    }
   }, [hydrate, sendCommand]);
 
   const hasActiveTraining = useMemo(() => hasTrainingRun(runs), [runs]);

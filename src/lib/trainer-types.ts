@@ -293,6 +293,22 @@ export function swigluHiddenDim(nEmbd: number) {
   return Math.max(1, Math.floor((8 * nEmbd) / 3));
 }
 
+export function validateModelConfig(model: Pick<ModelConfig, "nEmbd" | "nHead">) {
+  if (!Number.isInteger(model.nEmbd) || model.nEmbd < 1) {
+    throw new Error("Embedding width must be a positive integer.");
+  }
+
+  if (!Number.isInteger(model.nHead) || model.nHead < 1) {
+    throw new Error("Attention head count must be a positive integer.");
+  }
+
+  if (model.nEmbd % model.nHead !== 0) {
+    throw new Error("Embedding width must be divisible by attention head count.");
+  }
+
+  return model;
+}
+
 export function createModelConfigFromDimensions({
   blockSize,
   nEmbd,
@@ -306,6 +322,8 @@ export function createModelConfigFromDimensions({
   nLayer: number;
   vocabSize: number;
 }): ModelConfig {
+  validateModelConfig({ nEmbd, nHead });
+
   return {
     blockSize,
     mlpHiddenDim: swigluHiddenDim(nEmbd),
