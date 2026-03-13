@@ -61,9 +61,7 @@ export function TrainingLiveStats({
   const theme = useAppTheme();
   const frozenChartAnchorRef = useRef<{
     anchorSeconds: number;
-    chartVariantKey: string;
-    runId: string | null;
-    updatedAt: number;
+    anchorKey: string;
   } | null>(null);
   const [selectedMetric, setSelectedMetric] = useState<TrainingMetricKey>("loss");
   const [selectedWindowSeconds, setSelectedWindowSeconds] = useState<number>(60);
@@ -84,13 +82,12 @@ export function TrainingLiveStats({
   );
   const metricOption = METRIC_OPTIONS.find((option) => option.valueKey === selectedMetric);
   const latestElapsedSeconds = latestPoint?.elapsedTimeSeconds ?? 0;
-  const chartVariantKey = `${selectedMetric}:${selectedWindowSeconds}`;
+  const anchorKey = `${run?.id ?? ""}:${run?.updatedAt ?? 0}:${selectedMetric}:${selectedWindowSeconds}`;
   const chartLatestWallClockSeconds = getChartLatestWallClockSeconds({
     anchorRef: frozenChartAnchorRef,
-    chartVariantKey,
+    anchorKey,
     isTraining,
     latestPoint,
-    run,
   });
   const chartTimeOriginSeconds = useMemo(
     () => chartLatestWallClockSeconds - latestElapsedSeconds,
@@ -295,21 +292,14 @@ function formatElapsedChartTime(seconds: number) {
 
 function getChartLatestWallClockSeconds({
   anchorRef,
-  chartVariantKey,
+  anchorKey,
   isTraining,
   latestPoint,
-  run,
 }: {
-  anchorRef: MutableRefObject<{
-    anchorSeconds: number;
-    chartVariantKey: string;
-    runId: string | null;
-    updatedAt: number;
-  } | null>;
-  chartVariantKey: string;
+  anchorRef: MutableRefObject<{ anchorSeconds: number; anchorKey: string } | null>;
+  anchorKey: string;
   isTraining: boolean;
   latestPoint: ChartTelemetryPoint | null;
-  run: TrainingRunRecord | null;
 }) {
   if (!latestPoint) {
     anchorRef.current = null;
@@ -321,25 +311,12 @@ function getChartLatestWallClockSeconds({
     return latestPoint.time;
   }
 
-  const runId = run?.id ?? null;
-  const updatedAt = run?.updatedAt ?? 0;
-  const cachedAnchor = anchorRef.current;
-  if (
-    cachedAnchor &&
-    cachedAnchor.runId === runId &&
-    cachedAnchor.updatedAt === updatedAt &&
-    cachedAnchor.chartVariantKey === chartVariantKey
-  ) {
-    return cachedAnchor.anchorSeconds;
+  if (anchorRef.current?.anchorKey === anchorKey) {
+    return anchorRef.current.anchorSeconds;
   }
 
   const nextAnchorSeconds = Date.now() / 1000;
-  anchorRef.current = {
-    anchorSeconds: nextAnchorSeconds,
-    chartVariantKey,
-    runId,
-    updatedAt,
-  };
+  anchorRef.current = { anchorSeconds: nextAnchorSeconds, anchorKey };
   return nextAnchorSeconds;
 }
 
