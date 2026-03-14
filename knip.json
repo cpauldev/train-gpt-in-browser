@@ -1,0 +1,37 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "ignoreDependencies": [
+    "long",
+    "react-day-picker"
+  ],
+  "ignoreFiles": [
+    "src/vendor/protobufjs-inquire-shim.cjs"
+  ],
+  "ignoreExportsUsedInFile": {
+    "class": true,
+    "function": true,
+    "variable": true
+  },
+  "ignoreIssues": {
+    "src/components/code-editor-surface.tsx": [
+      "exports"
+    ],
+    "src/components/ui/**": [
+      "exports",
+      "files",
+      "types"
+    ]
+  },
+  "entry": [
+    "src/workers/trainer-worker.ts"
+  ],
+  "project": [
+    "src/**/*.cjs!",
+    "src/**/*.css!",
+    "src/**/*.{ts,tsx}!",
+    "!src/**/*.test.{ts,tsx}!",
+    "!src/lib/trainer-test-fixtures.ts!",
+    "!src/test/**!",
+    "!src/vite-env.d.ts!"
+  ]
+}

@@ -206,6 +206,10 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
         selectedRun && (selectedRun.checkpoint || selectedRun.checkpointSavedAt)
           ? () => void runs.downloadArtifact(selectedRun.id, "model")
           : undefined,
+      onEnsureRunDetails:
+        selectedRun && !selectedRun.checkpoint && selectedRun.checkpointSavedAt
+          ? () => void runs.ensureCheckpoint(selectedRun.id)
+          : undefined,
       onGenerationConfigChange: generation.setConfig,
       onResumeTraining: canResumeSelectedRun ? () => void runs.resume(selectedRun.id) : undefined,
       onSaveContent: workspace.saveSelectedFileContent,

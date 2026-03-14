@@ -18,7 +18,7 @@ export const FALLBACK_HASH_STEP = 0x9e3779b97f4a7c15n;
 export const ACTIVE_RUN_STORAGE_KEY = "dreamphrasegpt-browser:active-run";
 export const ACTIVE_FILE_STORAGE_KEY = "dreamphrasegpt-browser:active-file";
 export const AUTOSAVE_STEP_INTERVAL = 250;
-export const DEFAULT_BACKEND_PREFERENCE: BackendPreference = "auto";
+const DEFAULT_BACKEND_PREFERENCE: BackendPreference = "auto";
 
 export const BUILTIN_DATASETS: {
   description: string;

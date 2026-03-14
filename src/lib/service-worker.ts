@@ -36,7 +36,7 @@ async function requestPersistentStorage() {
   try {
     await navigator.storage.persist();
   } catch {
-    // Persistence is best-effort.
+    // Ignore browsers that reject persistent storage requests.
   }
 }
 

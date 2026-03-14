@@ -132,17 +132,6 @@ export async function listWorkspaceFiles() {
   });
 }
 
-export async function getWorkspaceFile(fileId: string) {
-  const db = await getTrainerDb();
-  return db.get("files", fileId);
-}
-
-export async function saveWorkspaceFile(file: WorkspaceFile) {
-  const db = await getTrainerDb();
-  await db.put("files", file);
-  return file;
-}
-
 export async function createWorkspaceFile(name: string, content = "") {
   const db = await getTrainerDb();
   const now = Date.now();

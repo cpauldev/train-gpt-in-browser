@@ -57,7 +57,7 @@ type ModelState = {
   positionEmbedding: TrainableState;
 };
 
-export type TrainingStepSummary = {
+type TrainingStepSummary = {
   checkpoint?: SerializedCheckpoint;
   completedSteps: number;
   elapsedSeconds: number;

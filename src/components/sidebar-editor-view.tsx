@@ -75,6 +75,7 @@ export function SidebarEditorView({
   onDeleteFile,
   onDeleteModel,
   onDownloadModel,
+  onEnsureRunDetails,
   onDraftContentChange,
   onDraftNameChange,
   onSaveContent,
@@ -97,6 +98,7 @@ export function SidebarEditorView({
   onDeleteFile?: () => void;
   onDeleteModel?: () => void;
   onDownloadModel?: () => void;
+  onEnsureRunDetails?: () => void | Promise<void>;
   onDraftContentChange: (value: string) => void;
   onDraftNameChange: (value: string) => void;
   onSaveContent?: (content: string) => void;
@@ -115,12 +117,13 @@ export function SidebarEditorView({
 }) {
   const [activeTab, setActiveTab] = useState<"details" | "training" | "source">("training");
   const [hasVisitedSourceTab, setHasVisitedSourceTab] = useState(false);
+  const [isLoadingRunDetails, setIsLoadingRunDetails] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [savedContent, setSavedContent] = useState(selectedFile?.content ?? "");
   const isDirty = draftContent !== savedContent;
 
-  // Reset saved content baseline when switching files.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally only resets on file id change
+  // Reset the saved baseline only when the selected file changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: including draft content would overwrite the dirty-state baseline
   useEffect(() => {
     setSavedContent(selectedFile?.content ?? "");
   }, [selectedFile?.id]);
@@ -181,6 +184,39 @@ export function SidebarEditorView({
       setHasVisitedSourceTab(true);
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (
+      activeTab !== "details" ||
+      !selectedRun ||
+      selectedRun.checkpoint ||
+      !selectedRun.checkpointSavedAt ||
+      isTrainingRunInProgress(selectedRun.status) ||
+      !onEnsureRunDetails
+    ) {
+      setIsLoadingRunDetails(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingRunDetails(true);
+    Promise.resolve(onEnsureRunDetails()).finally(() => {
+      if (!cancelled) {
+        setIsLoadingRunDetails(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    onEnsureRunDetails,
+    selectedRun,
+    selectedRun?.checkpoint,
+    selectedRun?.checkpointSavedAt,
+    selectedRun?.status,
+  ]);
 
   if (!selectedFile || !selectedFileSummary) {
     return (
@@ -279,7 +315,16 @@ export function SidebarEditorView({
                     </div>
                   </section>
 
-                  {selectedRun && <InspectView run={selectedRun} />}
+                  {selectedRun?.checkpoint ? <InspectView run={selectedRun} /> : null}
+                  {selectedRun && !selectedRun.checkpoint && isLoadingRunDetails ? (
+                    <section className="space-y-3">
+                      <h2 className="font-semibold text-lg">Run</h2>
+                      <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-background px-4 py-3 text-sm text-muted-foreground">
+                        <Spinner className="size-4" />
+                        Loading run details...
+                      </div>
+                    </section>
+                  ) : null}
                 </div>
               </ScrollArea>
 

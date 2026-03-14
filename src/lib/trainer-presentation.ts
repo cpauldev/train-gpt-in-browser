@@ -1,7 +1,6 @@
-import type { TrainingRunStatus, TrainingTelemetryPoint } from "@/lib/trainer-types";
-import { getLatestTrainingTelemetry } from "@/lib/training-telemetry";
+import type { TrainingRunStatus } from "@/lib/trainer-types";
 
-export type WorkspaceRuntimeStatus = {
+type WorkspaceRuntimeStatus = {
   dotClass: string;
   label: string;
   storageLabel: string;
@@ -68,14 +67,6 @@ export function formatTimestamp(value: number): string {
   return new Date(value).toLocaleString("en-US", {
     dateStyle: "medium",
     timeStyle: "medium",
-  });
-}
-
-export function getLiveTrainingStatusLabel(points: TrainingTelemetryPoint[]) {
-  const latestPoint = getLatestTrainingTelemetry(points);
-  return formatLiveTrainingStatusLabel({
-    step: latestPoint?.step,
-    totalSteps: latestPoint?.totalSteps,
   });
 }
 

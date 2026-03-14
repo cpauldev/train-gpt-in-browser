@@ -64,7 +64,7 @@ import {
   summarizeRejectedWorkspaceImports,
 } from "@/lib/workspace-imports";
 
-export type BrowserTrainerBusyState = {
+type BrowserTrainerBusyState = {
   downloading: boolean;
   generating: boolean;
   hydrating: boolean;
@@ -388,6 +388,18 @@ export function useBrowserTrainer() {
       return hydratedRun;
     },
     [replaceRun],
+  );
+
+  const ensureRunCheckpointLoaded = useCallback(
+    async (runId: string) => {
+      const run = runsRef.current.find((item) => item.id === runId) ?? null;
+      if (!run) {
+        return null;
+      }
+
+      return loadLatestRunCheckpoint(run);
+    },
+    [loadLatestRunCheckpoint],
   );
 
   const handleWorkerEvent = useCallback(
@@ -1175,6 +1187,7 @@ export function useBrowserTrainer() {
       active: activeRun,
       all: runs,
       downloadArtifact: downloadRunArtifact,
+      ensureCheckpoint: ensureRunCheckpointLoaded,
       getByFileId: getRunForFile,
       remove: removeRun,
       resume: resumeRun,

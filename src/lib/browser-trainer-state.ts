@@ -1,7 +1,7 @@
 import { createLogEntry } from "@/lib/trainer-core";
 import type { TrainingRunRecord, WorkspaceFile } from "@/lib/trainer-types";
 
-export type RestoredTrainerSelection = {
+type RestoredTrainerSelection = {
   activeRunId: string | null;
   selectedFileId: string | null;
 };

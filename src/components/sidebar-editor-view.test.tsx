@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -206,6 +206,7 @@ describe("SidebarEditorView", () => {
       checkpoint: undefined,
       checkpointSavedAt: Date.now(),
     };
+    const onEnsureRunDetails = vi.fn().mockResolvedValue(undefined);
 
     render(
       <SidebarEditorView
@@ -217,6 +218,7 @@ describe("SidebarEditorView", () => {
         onBack={vi.fn()}
         onResetLocalData={vi.fn()}
         onDownloadModel={vi.fn()}
+        onEnsureRunDetails={onEnsureRunDetails}
         onDraftContentChange={vi.fn()}
         onDraftNameChange={vi.fn()}
         onGenerationConfigChange={vi.fn()}
@@ -239,6 +241,7 @@ describe("SidebarEditorView", () => {
     expect(screen.getByRole("button", { name: /download model/i }).hasAttribute("disabled")).toBe(
       false,
     );
+    expect(onEnsureRunDetails).toHaveBeenCalledOnce();
   });
 
   it("ignores invalid numeric input instead of writing NaN into training config", async () => {
@@ -443,7 +446,9 @@ describe("SidebarEditorView", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: /training in progress/i })).toBeTruthy();
-    expect(screen.getByText("Preparing...")).toBeTruthy();
+    const trainingButton = screen.getByRole("button", { name: /training in progress/i });
+
+    expect(trainingButton).toBeTruthy();
+    expect(within(trainingButton).getByText("Preparing...")).toBeTruthy();
   });
 });

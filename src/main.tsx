@@ -7,8 +7,7 @@ import glowBg from "@/assets/glow.jpg";
 import { initializeAppTheme, ThemeProvider } from "./lib/app-theme";
 import { registerServiceWorker } from "./lib/service-worker";
 
-// Inject a high-priority preload link so the browser fetches the panel bg
-// before React renders, preventing the gradient-over-white pop-in.
+// Preload the hero background image before React mounts to avoid a white flash.
 const preloadLink = document.createElement("link");
 preloadLink.rel = "preload";
 preloadLink.as = "image";

@@ -68,7 +68,6 @@ export function useAnimatedValue(
     state.current.rafId = requestAnimationFrame(tick);
   }, [target, enabled, speed]);
 
-  // Cleanup on unmount.
   useEffect(
     () => () => {
       if (state.current.rafId) cancelAnimationFrame(state.current.rafId);

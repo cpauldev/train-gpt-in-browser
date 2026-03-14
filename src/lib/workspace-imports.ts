@@ -2,7 +2,7 @@ const TEXT_FILE_EXTENSION = ".txt";
 const TEXT_FILE_MIME = "text/plain";
 const REJECTED_FILE_PREVIEW_LIMIT = 3;
 
-export type WorkspaceImportCandidate = Pick<File, "name" | "type">;
+type WorkspaceImportCandidate = Pick<File, "name" | "type">;
 
 export function isSupportedWorkspaceImportFile(file: WorkspaceImportCandidate) {
   const normalizedName = file.name.trim().toLowerCase();

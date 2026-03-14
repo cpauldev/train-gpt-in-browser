@@ -40,7 +40,7 @@ export function writeStoredThemePreference(
 
     storage.setItem(THEME_STORAGE_KEY, preference);
   } catch {
-    // Ignore storage write failures.
+    // Ignore failures when theme preference cannot be persisted.
   }
 }
 
