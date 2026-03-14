@@ -243,11 +243,14 @@ function TrainingTelemetryChart({
     [points, selectedMetric, timelineOriginSeconds],
   );
   const chartValue = latestPoint?.[selectedMetric] ?? 0;
+  const livelineKey = shouldFreezeTimeline
+    ? `${runId ?? "no-run"}:${selectedMetric}`
+    : (runId ?? "no-run");
 
   return (
     <div className="h-56 bg-muted/20">
       <Liveline
-        key={runId ?? "no-run"}
+        key={livelineKey}
         data={chartData as LivelinePoint[]}
         value={chartValue}
         badgeVariant="minimal"

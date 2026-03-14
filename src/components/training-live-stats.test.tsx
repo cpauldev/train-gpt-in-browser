@@ -31,10 +31,18 @@ vi.mock("liveline", () => ({
     paused?: boolean;
   }) => {
     const mountIdRef = useRef<number | null>(null);
+    const pausedDataRef = useRef<Array<{ time: number; value: number }> | null>(null);
     if (mountIdRef.current === null) {
       mountIdRef.current = ++livelineMountCount;
     }
-    const series = data.map((point) => `${point.time}:${point.value}`).join("|");
+    if (paused && pausedDataRef.current === null && data.length >= 2) {
+      pausedDataRef.current = data.slice();
+    }
+    if (!paused) {
+      pausedDataRef.current = null;
+    }
+    const effectiveData = pausedDataRef.current ?? data;
+    const series = effectiveData.map((point) => `${point.time}:${point.value}`).join("|");
     const latestTime = data.at(-1)?.time;
     const formattedTime =
       typeof latestTime === "number" && formatTime ? formatTime(latestTime) : "";
@@ -124,13 +132,17 @@ describe("TrainingLiveStats", () => {
 
     render(<TrainingLiveStats isTraining={false} run={createRun()} />);
 
-    expect(screen.getByTestId("liveline").textContent).toContain(":#eb6f36:0:02:paused");
+    expect(screen.getByTestId("liveline").textContent).toContain("1:1.5|2:1.25:#eb6f36:0:02:paused");
 
     await user.click(screen.getByRole("button", { name: "Tokens/s" }));
-    expect(screen.getByTestId("liveline").textContent).toContain(":#2f8f5b:0:02:paused");
+    expect(screen.getByTestId("liveline").textContent).toContain(
+      "1:128|2:256:#2f8f5b:0:02:paused",
+    );
 
     await user.click(screen.getByRole("button", { name: "Steps/s" }));
-    expect(screen.getByTestId("liveline").textContent).toContain(":#3a76f0:0:02:paused");
+    expect(screen.getByTestId("liveline").textContent).toContain(
+      "1:2.5|2:3.25:#3a76f0:0:02:paused",
+    );
   });
 
   it("preserves elapsed training time when switching metrics after a delay on a completed run", async () => {
