@@ -1,5 +1,6 @@
 import { FileText, Plus, Upload } from "lucide-react";
-import { PanelLoadingState } from "@/components/panel-loading-state";
+import { useAnimatedValue } from "@/lib/use-animated-value";
+import { getLatestTrainingTelemetry } from "@/lib/training-telemetry";
 import { SidebarFrameHeader } from "@/components/sidebar-frame-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,12 @@ import { Frame, FramePanel } from "@/components/ui/frame";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip";
 import {
+  formatLiveTrainingStatusLabel,
+  formatTrainingRunStatusLabel,
+} from "@/lib/trainer-presentation";
+import {
   getTrainingRunStatusBadgeVariant,
+  isTrainingRunInProgress,
   type TrainingRunRecord,
   type WorkspaceFile,
 } from "@/lib/trainer-types";
@@ -35,6 +41,7 @@ export function SidebarListView({
   onOpenFile: (file: WorkspaceFile) => void | Promise<void>;
   runs: TrainingRunRecord[];
 }) {
+  const isBusy = isHydrating || isImporting;
   const runByFileId = new Map(runs.map((run) => [run.fileId, run]));
 
   return (
@@ -44,8 +51,15 @@ export function SidebarListView({
       <FramePanel className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
         <ScrollArea className="flex-1" scrollFade scrollbarGutter>
           <div className="space-y-2 px-4 py-4 lg:px-5 lg:py-5">
-            {isHydrating ? (
-              <PanelLoadingState className="min-h-[18rem]" />
+            {isHydrating && files.length === 0 ? (
+              <Empty className="min-h-[18rem] px-4 py-4">
+                <EmptyHeader>
+                  <EmptyTitle>Loading local data</EmptyTitle>
+                  <EmptyDescription>
+                    Loading datasets and saved runs from this browser.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : files.length === 0 ? (
               <Empty className="min-h-[18rem] px-4 py-4">
                 <EmptyHeader>
@@ -72,7 +86,7 @@ export function SidebarListView({
             <Button
               onClick={onCreateFile}
               className="min-w-0 w-full gap-2 lg:flex-1"
-              disabled={isImporting}
+              disabled={isBusy}
             >
               <Plus className="size-4" />
               New Dataset
@@ -84,7 +98,7 @@ export function SidebarListView({
                     variant="outline"
                     className="min-w-0 w-full gap-2 lg:ml-2 lg:flex-1"
                     aria-label={isImporting ? "Importing files" : "Upload files"}
-                    disabled={isImporting}
+                    disabled={isBusy}
                   />
                 }
                 onClick={onImportClick}
@@ -93,7 +107,11 @@ export function SidebarListView({
                 {isImporting ? "Importing..." : "Upload Dataset"}
               </TooltipTrigger>
               <TooltipPopup>
-                {isImporting ? "Reading local files" : "Import .txt files"}
+                {isHydrating
+                  ? "Loading browser datasets"
+                  : isImporting
+                    ? "Reading local files"
+                    : "Import .txt files"}
               </TooltipPopup>
             </Tooltip>
           </div>
@@ -123,13 +141,41 @@ function DatasetListButton({
           <FileText className="size-4 text-muted-foreground" />
           <span className="font-medium text-sm">{file.title ?? file.name}</span>
           {file.source === "user" ? <Badge variant="outline">Local</Badge> : null}
-          {run ? (
-            <Badge variant={getTrainingRunStatusBadgeVariant(run.status)}>{run.status}</Badge>
-          ) : null}
+          <DatasetRunBadge run={run} />
         </div>
         <p className="text-xs text-muted-foreground">{getDatasetListDescription(file)}</p>
       </div>
     </Button>
+  );
+}
+
+function DatasetRunBadge({ run }: { run?: TrainingRunRecord }) {
+  const latestPoint = getLatestTrainingTelemetry(run?.telemetry ?? []);
+  const isLiveTraining =
+    run?.status === "training" &&
+    Boolean(latestPoint && latestPoint.step < latestPoint.totalSteps);
+  const animatedStep = useAnimatedValue(latestPoint?.step ?? 0, { enabled: isLiveTraining });
+
+  if (!run) {
+    return null;
+  }
+
+  const label =
+    run.status === "starting"
+      ? "Preparing..."
+      : run.status === "training"
+      ? formatLiveTrainingStatusLabel({
+          step: isLiveTraining ? animatedStep : latestPoint?.step,
+          totalSteps: latestPoint?.totalSteps,
+        })
+      : isTrainingRunInProgress(run.status)
+        ? "Preparing..."
+        : formatTrainingRunStatusLabel(run.status);
+
+  return (
+    <Badge className="tabular-nums" variant={getTrainingRunStatusBadgeVariant(run.status)}>
+      {label}
+    </Badge>
   );
 }
 

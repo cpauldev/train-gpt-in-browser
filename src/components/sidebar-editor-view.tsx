@@ -12,9 +12,9 @@ import {
 import { lazy, Suspense, useEffect, useState } from "react";
 
 import { InspectView } from "@/components/inspect-view";
-import { PanelLoadingState } from "@/components/panel-loading-state";
 import { SidebarFrameHeader } from "@/components/sidebar-frame-header";
 import { StatCard } from "@/components/stat-card";
+import { TrainingLiveStats } from "@/components/training-live-stats";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -29,12 +29,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { Toggle } from "@/components/ui/toggle";
 import { clampTemperature, formatNumber } from "@/lib/trainer-core";
 import { formatDurationSeconds } from "@/lib/trainer-presentation";
 import {
   createGenerationConfig,
+  isTrainingRunInProgress,
   type DatasetTextSummary,
   type GenerationConfig,
   type TrainingConfig,
@@ -44,14 +46,22 @@ import {
 import { getLatestTrainingTelemetry } from "@/lib/training-telemetry";
 import { useAnimatedValue } from "@/lib/use-animated-value";
 
-const CodeEditorSurface = lazy(async () => {
-  const module = await import("@/components/code-editor-surface");
-  return { default: module.CodeEditorSurface };
-});
+let codeEditorSurfaceModulePromise: Promise<
+  typeof import("@/components/code-editor-surface")
+> | null = null;
 
-const TrainingLiveStats = lazy(async () => {
-  const module = await import("@/components/training-live-stats");
-  return { default: module.TrainingLiveStats };
+function loadCodeEditorSurfaceModule() {
+  codeEditorSurfaceModulePromise ??= import("@/components/code-editor-surface");
+  return codeEditorSurfaceModulePromise;
+}
+
+export function preloadCodeEditorSurface() {
+  return loadCodeEditorSurfaceModule();
+}
+
+const LazyCodeEditorSurface = lazy(async () => {
+  const module = await loadCodeEditorSurfaceModule();
+  return { default: module.CodeEditorSurface };
 });
 
 export function SidebarEditorView({
@@ -103,7 +113,8 @@ export function SidebarEditorView({
   selectedRun: TrainingRunRecord | null;
   trainingConfig: TrainingConfig;
 }) {
-  const [activeTab, setActiveTab] = useState<"overview" | "training" | "source">("overview");
+  const [activeTab, setActiveTab] = useState<"details" | "training" | "source">("training");
+  const [hasVisitedSourceTab, setHasVisitedSourceTab] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [savedContent, setSavedContent] = useState(selectedFile?.content ?? "");
   const isDirty = draftContent !== savedContent;
@@ -120,19 +131,22 @@ export function SidebarEditorView({
   };
 
   const canContinueTraining = Boolean(onResumeTraining);
+  const isStartingTraining = selectedRun?.status === "starting";
   const latestTrainingPoint = getLatestTrainingTelemetry(selectedRun?.telemetry ?? []);
   const isFinalizingTraining =
-    isTraining &&
+    selectedRun?.status === "training" &&
     Boolean(latestTrainingPoint && latestTrainingPoint.step >= latestTrainingPoint.totalSteps);
-  const rawEtaSeconds = isTraining
-    ? isFinalizingTraining
-      ? null
-      : computeEtaSeconds(latestTrainingPoint)
-    : null;
+  const rawEtaSeconds =
+    latestTrainingPoint &&
+    latestTrainingPoint.step < latestTrainingPoint.totalSteps &&
+    selectedRun?.status === "training"
+      ? computeEtaSeconds(latestTrainingPoint)
+      : null;
   const animatedEtaSeconds = useAnimatedValue(rawEtaSeconds ?? 0, {
     enabled: rawEtaSeconds !== null,
   });
   const trainingEta = rawEtaSeconds !== null ? formatDurationSeconds(animatedEtaSeconds) : null;
+  const trainingMetaLabel = isStartingTraining ? "Preparing..." : trainingEta;
   const trainingActionLabel = isTraining
     ? isFinalizingTraining
       ? "Finalizing results"
@@ -155,12 +169,18 @@ export function SidebarEditorView({
   });
 
   useEffect(() => {
-    if (selectedRun?.status !== "training") {
+    if (!selectedRun || !isTrainingRunInProgress(selectedRun.status)) {
       return;
     }
 
     setActiveTab("training");
-  }, [selectedRun?.status]);
+  }, [selectedRun?.id, selectedRun?.status]);
+
+  useEffect(() => {
+    if (activeTab === "source") {
+      setHasVisitedSourceTab(true);
+    }
+  }, [activeTab]);
 
   if (!selectedFile || !selectedFileSummary) {
     return (
@@ -191,15 +211,11 @@ export function SidebarEditorView({
       <FramePanel className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
         <Tabs
           value={activeTab}
-          onValueChange={(value) => setActiveTab(value as "overview" | "training" | "source")}
+          onValueChange={(value) => setActiveTab(value as "details" | "training" | "source")}
           className="min-h-0 flex-1 gap-0"
         >
           <div className="border-b border-border/70 px-4 pt-3 lg:px-5 lg:pt-4">
             <TabsList variant="underline" className="min-w-max">
-              <TabsTab value="overview">
-                <LayoutPanelTop className="opacity-60" />
-                Overview
-              </TabsTab>
               <TabsTab value="training">
                 <Play className="opacity-60" />
                 Training
@@ -208,10 +224,14 @@ export function SidebarEditorView({
                 <TextCursorInput className="opacity-60" />
                 Source
               </TabsTab>
+              <TabsTab value="details">
+                <LayoutPanelTop className="opacity-60" />
+                Details
+              </TabsTab>
             </TabsList>
           </div>
 
-          <TabsPanel value="overview" className="min-h-0 p-0">
+          <TabsPanel value="details" className="min-h-0 p-0">
             <div className="flex h-full min-h-0 flex-col">
               <ScrollArea className="flex-1" scrollFade scrollbarGutter>
                 <div className="space-y-6 px-4 py-4 lg:px-5 lg:py-5">
@@ -242,7 +262,7 @@ export function SidebarEditorView({
                     <div className="grid gap-3 lg:grid-cols-2">
                       <StatCard
                         label="Documents"
-                        value={formatNumber(selectedFileSummary.documents.length)}
+                        value={formatNumber(selectedFileSummary.documentCount)}
                       />
                       <StatCard
                         label="Characters"
@@ -273,7 +293,7 @@ export function SidebarEditorView({
                           onClick={() => onDownloadModel?.()}
                           disabled={
                             (!selectedRun.checkpoint && !selectedRun.checkpointSavedAt) ||
-                            selectedRun.status === "training"
+                            isTrainingRunInProgress(selectedRun.status)
                           }
                           className="w-full gap-2"
                         >
@@ -283,7 +303,7 @@ export function SidebarEditorView({
                         <Button
                           variant="destructive-outline"
                           onClick={onDeleteModel}
-                          disabled={selectedRun.status === "training"}
+                          disabled={isTrainingRunInProgress(selectedRun.status)}
                           className="w-full gap-2"
                         >
                           <Trash2 className="size-4" />
@@ -341,19 +361,9 @@ export function SidebarEditorView({
                     </div>
                   </div>
                 ) : (
-                  <Suspense
-                    fallback={
-                      <PanelLoadingState
-                        className="min-h-[18rem] px-5 py-5"
-                        title="Loading training stats"
-                        description="Preparing live telemetry charts for this run."
-                      />
-                    }
-                  >
-                    <div className="space-y-6">
-                      <TrainingLiveStats isTraining={isTraining} run={selectedRun} />
-                    </div>
-                  </Suspense>
+                  <div className="space-y-6">
+                    <TrainingLiveStats isTraining={isTraining} run={selectedRun} />
+                  </div>
                 )}
               </ScrollArea>
 
@@ -373,12 +383,12 @@ export function SidebarEditorView({
                   >
                     {trainingActionIcon}
                     {trainingActionLabel}
-                    {trainingEta && (
+                    {trainingMetaLabel && (
                       <Badge
                         variant="outline"
                         className="ml-auto shrink-0 border-current/15 bg-current/10 text-inherit tabular-nums"
                       >
-                        {trainingEta}
+                        {trainingMetaLabel}
                       </Badge>
                     )}
                   </Button>
@@ -408,24 +418,29 @@ export function SidebarEditorView({
                 </div>
               </div>
 
-              <Suspense
-                fallback={
-                  <PanelLoadingState
+              {hasVisitedSourceTab ? (
+                <Suspense
+                  fallback={
+                    <div
+                      aria-hidden
+                      className="flex flex-1 items-center justify-center bg-background"
+                    >
+                      <Spinner className="size-5 text-muted-foreground" />
+                    </div>
+                  }
+                >
+                  <LazyCodeEditorSurface
+                    ariaLabel="Source text"
                     className="flex-1"
-                    title="Loading editor"
-                    description="Preparing the source editor for this dataset."
+                    showLineNumbers
+                    readOnly={isTraining}
+                    value={draftContent}
+                    onChange={onDraftContentChange}
                   />
-                }
-              >
-                <CodeEditorSurface
-                  ariaLabel="Source text"
-                  className="flex-1"
-                  showLineNumbers
-                  readOnly={isTraining}
-                  value={draftContent}
-                  onChange={onDraftContentChange}
-                />
-              </Suspense>
+                </Suspense>
+              ) : (
+                <div className="flex-1" />
+              )}
 
               <div className="border-t border-border/70 px-4 py-4 lg:px-5">
                 <div className="flex flex-col items-stretch gap-2 lg:flex-row">

@@ -44,6 +44,7 @@ import {
   type DatasetTextSummary,
   type GenerationConfig,
   hasTrainingRun,
+  isTrainingRunInProgress,
   type RunArtifactKind,
   type RunPanelTab,
   resolveTrainingRunResumeTargetSteps,
@@ -82,9 +83,17 @@ const INITIAL_BUSY_STATE: BrowserTrainerBusyState = {
 };
 
 export function useBrowserTrainer() {
-  const workerRef = useRef<Worker | null>(null);
+  const previewWorkerRef = useRef<Worker | null>(null);
+  const trainingWorkersRef = useRef<
+    Map<string, { onMessage: (event: MessageEvent<TrainerEvent>) => void; worker: Worker }>
+  >(new Map());
   const runsRef = useRef<TrainingRunRecord[]>([]);
+  const selectedFileIdRef = useRef<string | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
   const importInFlightRef = useRef(false);
+  const fileSummaryCacheRef = useRef<
+    Map<string, { summary: DatasetTextSummary; updatedAt: number }>
+  >(new Map());
   const telemetryPersistedAtRef = useRef<Map<string, number>>(new Map());
 
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
@@ -100,6 +109,14 @@ export function useBrowserTrainer() {
   useEffect(() => {
     runsRef.current = runs;
   }, [runs]);
+
+  useEffect(() => {
+    selectedFileIdRef.current = selectedFileId;
+  }, [selectedFileId]);
+
+  useEffect(() => {
+    activeRunIdRef.current = activeRunId;
+  }, [activeRunId]);
 
   const commitFiles = useCallback((nextFiles: WorkspaceFile[]) => {
     startTransition(() => {
@@ -132,16 +149,44 @@ export function useBrowserTrainer() {
     () => runs.find((run) => run.id === activeRunId) ?? null,
     [activeRunId, runs],
   );
+  const getDatasetSummary = useCallback((file: WorkspaceFile) => {
+    const cachedSummary = fileSummaryCacheRef.current.get(file.id);
+
+    if (cachedSummary && cachedSummary.updatedAt === file.updatedAt) {
+      return cachedSummary.summary;
+    }
+
+    const summary = summarizeDatasetText(file.content);
+    fileSummaryCacheRef.current.set(file.id, {
+      summary,
+      updatedAt: file.updatedAt,
+    });
+    return summary;
+  }, []);
   const selectedFileSummary = useMemo<DatasetTextSummary | null>(() => {
     if (!selectedFile) {
       return null;
     }
 
-    return summarizeDatasetText(selectedFile.content);
-  }, [selectedFile]);
+    return getDatasetSummary(selectedFile);
+  }, [getDatasetSummary, selectedFile]);
 
-  const sendCommand = useCallback((command: TrainerCommand) => {
-    workerRef.current?.postMessage(command);
+  useEffect(() => {
+    if (files.length === 0) {
+      fileSummaryCacheRef.current.clear();
+      return;
+    }
+
+    const activeFileIds = new Set(files.map((file) => file.id));
+    for (const fileId of fileSummaryCacheRef.current.keys()) {
+      if (!activeFileIds.has(fileId)) {
+        fileSummaryCacheRef.current.delete(fileId);
+      }
+    }
+  }, [files]);
+
+  const sendPreviewCommand = useCallback((command: TrainerCommand) => {
+    previewWorkerRef.current?.postMessage(command);
   }, []);
 
   const getRunForFile = useCallback(
@@ -156,13 +201,13 @@ export function useBrowserTrainer() {
         return;
       }
 
-      sendCommand({
+      sendPreviewCommand({
         checkpoint: run.checkpoint,
         runId: run.id,
         type: "loadRun",
       });
     },
-    [sendCommand],
+    [sendPreviewCommand],
   );
 
   const clearSelection = useCallback(() => {
@@ -378,12 +423,11 @@ export function useBrowserTrainer() {
             {
               ...run,
               logs,
-              status: "training",
+              status: "starting",
               updatedAt: Date.now(),
             },
             { persist: false },
           );
-          setActiveTab("generated");
           return;
         }
 
@@ -414,7 +458,6 @@ export function useBrowserTrainer() {
             {
               ...run,
               logs: appendLogs(run.logs, [event.logEntry]),
-              status: "training",
               updatedAt: Date.now(),
             },
             { persist: false },
@@ -493,9 +536,12 @@ export function useBrowserTrainer() {
 
           await replaceRun(nextRun, { persistCheckpoint: false });
           telemetryPersistedAtRef.current.delete(event.runId);
-          persistActiveRunId(event.runId);
-          persistSelectedFileId(nextRun.fileId);
-          setActiveTab("generated");
+          if (
+            activeRunIdRef.current === event.runId ||
+            selectedFileIdRef.current === nextRun.fileId
+          ) {
+            setActiveTab("generated");
+          }
           toastManager.add({
             description: `Your model is ready. Completed in ${formatDurationSeconds(event.elapsedSeconds)}.`,
             title: "Training complete",
@@ -569,14 +615,57 @@ export function useBrowserTrainer() {
         }
       }
     },
-    [persistActiveRunId, persistSelectedFileId, replaceRun],
+    [replaceRun],
+  );
+
+  const terminateTrainingWorker = useCallback((runId: string) => {
+    const workerEntry = trainingWorkersRef.current.get(runId);
+    if (!workerEntry) {
+      return;
+    }
+
+    workerEntry.worker.removeEventListener("message", workerEntry.onMessage);
+    workerEntry.worker.terminate();
+    trainingWorkersRef.current.delete(runId);
+  }, []);
+
+  const terminateAllTrainingWorkers = useCallback(() => {
+    for (const runId of [...trainingWorkersRef.current.keys()]) {
+      terminateTrainingWorker(runId);
+    }
+  }, [terminateTrainingWorker]);
+
+  const spawnTrainingWorker = useCallback(
+    (runId: string) => {
+      terminateTrainingWorker(runId);
+
+      const worker = new Worker(new URL("../workers/trainer-worker.ts", import.meta.url), {
+        type: "module",
+      });
+      const onMessage = (event: MessageEvent<TrainerEvent>) => {
+        const nextEvent = event.data;
+        void handleWorkerEvent(nextEvent).finally(() => {
+          if (
+            nextEvent.type === "trainingCompleted" ||
+            nextEvent.type === "error"
+          ) {
+            terminateTrainingWorker(runId);
+          }
+        });
+      };
+
+      worker.addEventListener("message", onMessage);
+      trainingWorkersRef.current.set(runId, { onMessage, worker });
+      return worker;
+    },
+    [handleWorkerEvent, terminateTrainingWorker],
   );
 
   useEffect(() => {
     const worker = new Worker(new URL("../workers/trainer-worker.ts", import.meta.url), {
       type: "module",
     });
-    workerRef.current = worker;
+    previewWorkerRef.current = worker;
 
     const onMessage = (event: MessageEvent<TrainerEvent>) => {
       void handleWorkerEvent(event.data);
@@ -588,9 +677,10 @@ export function useBrowserTrainer() {
     return () => {
       worker.removeEventListener("message", onMessage);
       worker.terminate();
-      workerRef.current = null;
+      previewWorkerRef.current = null;
+      terminateAllTrainingWorkers();
     };
-  }, [handleWorkerEvent, hydrate]);
+  }, [handleWorkerEvent, hydrate, terminateAllTrainingWorkers]);
 
   const createFile = useCallback(
     async (name: string) => {
@@ -703,7 +793,8 @@ export function useBrowserTrainer() {
 
       await Promise.all(
         relatedRunIds.map(async (runId) => {
-          sendCommand({
+          terminateTrainingWorker(runId);
+          sendPreviewCommand({
             runId,
             type: "deleteRun",
           });
@@ -723,16 +814,13 @@ export function useBrowserTrainer() {
       commitRuns,
       persistActiveRunId,
       selectedFileId,
-      sendCommand,
+      sendPreviewCommand,
+      terminateTrainingWorker,
     ],
   );
 
   const startTraining = useCallback(
     async (fileOverride?: Pick<WorkspaceFile, "content" | "id" | "name">) => {
-      if (hasTrainingRun(runsRef.current)) {
-        return;
-      }
-
       const fileToTrain = fileOverride ?? selectedFile;
       if (!fileToTrain) {
         return;
@@ -740,7 +828,8 @@ export function useBrowserTrainer() {
 
       const existingRun = runsRef.current.find((item) => item.fileId === fileToTrain.id) ?? null;
       if (existingRun) {
-        sendCommand({
+        terminateTrainingWorker(existingRun.id);
+        sendPreviewCommand({
           runId: existingRun.id,
           type: "deleteRun",
         });
@@ -755,7 +844,7 @@ export function useBrowserTrainer() {
         createdAt: now,
         datasetStats: {
           characterCount: summary.characterCount,
-          documentCount: summary.documents.length,
+          documentCount: summary.documentCount,
           lineCount: summary.lineCount,
           tokenCount: summary.tokenCount,
           vocabSize: summary.vocabSize,
@@ -767,7 +856,7 @@ export function useBrowserTrainer() {
         likes: [],
         logs: [],
         name: getRunName(fileToTrain),
-        status: "training",
+        status: "starting",
         telemetry: [],
         trainingConfig: {
           ...trainingConfig,
@@ -784,7 +873,7 @@ export function useBrowserTrainer() {
       persistActiveRunId(runId);
       setActiveTab("generated");
 
-      sendCommand({
+      spawnTrainingWorker(runId).postMessage({
         file: {
           content: fileToTrain.content,
           id: fileToTrain.id,
@@ -806,7 +895,9 @@ export function useBrowserTrainer() {
       persistSelectedFileId,
       replaceRun,
       selectedFile,
-      sendCommand,
+      sendPreviewCommand,
+      spawnTrainingWorker,
+      terminateTrainingWorker,
       trainingConfig,
     ],
   );
@@ -814,7 +905,7 @@ export function useBrowserTrainer() {
   const resumeRun = useCallback(
     async (runId: string) => {
       const run = runsRef.current.find((item) => item.id === runId);
-      if (!run || run.status === "training") {
+      if (!run || isTrainingRunInProgress(run.status)) {
         return;
       }
 
@@ -853,7 +944,7 @@ export function useBrowserTrainer() {
         checkpoint: undefined,
         checkpointSavedAt:
           checkpointedRun.checkpointSavedAt ?? checkpointedRun.checkpoint.exportedAt,
-        status: "training",
+        status: "starting",
         trainingConfig: nextTrainingConfig,
         updatedAt: Date.now(),
       });
@@ -861,7 +952,7 @@ export function useBrowserTrainer() {
       persistActiveRunId(runId);
       setActiveTab("generated");
 
-      sendCommand({
+      spawnTrainingWorker(runId).postMessage({
         checkpoint,
         file: {
           content: "",
@@ -884,7 +975,7 @@ export function useBrowserTrainer() {
       persistActiveRunId,
       persistSelectedFileId,
       replaceRun,
-      sendCommand,
+      spawnTrainingWorker,
     ],
   );
 
@@ -892,7 +983,7 @@ export function useBrowserTrainer() {
     async (temperature: number) => {
       if (
         !activeRun ||
-        activeRun.status === "training" ||
+        isTrainingRunInProgress(activeRun.status) ||
         busyState.generating ||
         (!activeRun.checkpoint && !activeRun.checkpointSavedAt)
       ) {
@@ -912,14 +1003,14 @@ export function useBrowserTrainer() {
         temperature: clampTemperature(temperature),
       });
 
-      sendCommand({
+      sendPreviewCommand({
         checkpoint: checkpointedRun.checkpoint,
         generationConfig: config,
         runId: checkpointedRun.id,
         type: "generateSamples",
       });
     },
-    [activeRun, busyState.generating, generationConfig, loadLatestRunCheckpoint, sendCommand],
+    [activeRun, busyState.generating, generationConfig, loadLatestRunCheckpoint, sendPreviewCommand],
   );
 
   const ensureRunArtifacts = useCallback(
@@ -948,7 +1039,7 @@ export function useBrowserTrainer() {
   const downloadRunArtifact = useCallback(
     async (runId: string, kind: RunArtifactKind) => {
       const run = runsRef.current.find((item) => item.id === runId);
-      if (!run || run.status === "training" || (!run.checkpoint && !run.checkpointSavedAt)) {
+      if (!run || isTrainingRunInProgress(run.status) || (!run.checkpoint && !run.checkpointSavedAt)) {
         return;
       }
 
@@ -978,12 +1069,8 @@ export function useBrowserTrainer() {
 
   const removeRun = useCallback(
     async (runId: string) => {
-      if (hasTrainingRun(runsRef.current)) {
-        return;
-      }
-
       const runToRemove = runsRef.current.find((item) => item.id === runId);
-      if (!runToRemove) {
+      if (!runToRemove || isTrainingRunInProgress(runToRemove.status)) {
         return;
       }
 
@@ -993,7 +1080,8 @@ export function useBrowserTrainer() {
         persistActiveRunId(null);
       }
 
-      sendCommand({
+      terminateTrainingWorker(runId);
+      sendPreviewCommand({
         runId,
         type: "deleteRun",
       });
@@ -1011,7 +1099,14 @@ export function useBrowserTrainer() {
         return;
       }
     },
-    [activeRunId, commitRuns, hydrate, persistActiveRunId, sendCommand],
+    [
+      activeRunId,
+      commitRuns,
+      hydrate,
+      persistActiveRunId,
+      sendPreviewCommand,
+      terminateTrainingWorker,
+    ],
   );
 
   const toggleLike = useCallback(
@@ -1044,16 +1139,12 @@ export function useBrowserTrainer() {
   const resetAll = useCallback(async () => {
     setBusyState((current) => ({ ...current, generating: false, resetting: true }));
     try {
-      sendCommand({ type: "resetAll" });
+      terminateAllTrainingWorkers();
+      sendPreviewCommand({ type: "resetAll" });
       await resetTrainerStorage();
       await hydrate({ suppressErrorToast: true });
       setTrainingConfig(DEFAULT_TRAINING_CONFIG);
       setGenerationConfig(DEFAULT_GENERATION_CONFIG);
-      toastManager.add({
-        description: "Built-in datasets were restored.",
-        title: "Local data cleared",
-        type: "success",
-      });
     } catch (error) {
       toastManager.add({
         description: error instanceof Error ? error.message : "The browser data couldn't be reset.",
@@ -1063,7 +1154,7 @@ export function useBrowserTrainer() {
     } finally {
       setBusyState((current) => ({ ...current, resetting: false }));
     }
-  }, [hydrate, sendCommand]);
+  }, [hydrate, sendPreviewCommand, terminateAllTrainingWorkers]);
 
   const hasActiveTraining = useMemo(() => hasTrainingRun(runs), [runs]);
 

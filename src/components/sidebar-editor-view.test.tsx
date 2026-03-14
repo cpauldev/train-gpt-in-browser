@@ -133,7 +133,7 @@ describe("SidebarEditorView", () => {
         selectedFile={selectedFile}
         selectedFileSummary={{
           characterCount: 9,
-          documents: ["alpha", "beta"],
+          documentCount: 2,
           lineCount: 2,
           tokenCount: 11,
           vocabSize: 8,
@@ -144,6 +144,7 @@ describe("SidebarEditorView", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /back/i }));
+    await user.click(screen.getByRole("tab", { name: /details/i }));
     fireEvent.change(screen.getByDisplayValue("ideas.txt"), {
       target: { value: "renamed.txt" },
     });
@@ -155,7 +156,7 @@ describe("SidebarEditorView", () => {
     expect(await screen.findByText(/live stats/i)).toBeTruthy();
     expect(await screen.findByTestId("liveline")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /continue training/i }));
-    fireEvent.click(screen.getByRole("tab", { name: /overview/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /details/i }));
     fireEvent.click(screen.getByRole("button", { name: /delete file/i }));
 
     expect(onBack).toHaveBeenCalledOnce();
@@ -185,7 +186,7 @@ describe("SidebarEditorView", () => {
         selectedFile={{ ...selectedFile, name: "english_words.txt", source: "builtin" }}
         selectedFileSummary={{
           characterCount: 9,
-          documents: ["alpha", "beta"],
+          documentCount: 2,
           lineCount: 2,
           tokenCount: 11,
           vocabSize: 8,
@@ -195,6 +196,7 @@ describe("SidebarEditorView", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("tab", { name: /details/i }));
     expect(screen.getByDisplayValue("english_words.txt").hasAttribute("disabled")).toBe(true);
   });
 
@@ -223,7 +225,7 @@ describe("SidebarEditorView", () => {
         selectedFile={selectedFile}
         selectedFileSummary={{
           characterCount: 9,
-          documents: ["alpha", "beta"],
+          documentCount: 2,
           lineCount: 2,
           tokenCount: 11,
           vocabSize: 8,
@@ -233,6 +235,7 @@ describe("SidebarEditorView", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("tab", { name: /details/i }));
     expect(screen.getByRole("button", { name: /download model/i }).hasAttribute("disabled")).toBe(
       false,
     );
@@ -259,7 +262,7 @@ describe("SidebarEditorView", () => {
         selectedFile={selectedFile}
         selectedFileSummary={{
           characterCount: 9,
-          documents: ["alpha", "beta"],
+          documentCount: 2,
           lineCount: 2,
           tokenCount: 11,
           vocabSize: 8,
@@ -314,7 +317,7 @@ describe("SidebarEditorView", () => {
         selectedFile={selectedFile}
         selectedFileSummary={{
           characterCount: 9,
-          documents: ["alpha", "beta"],
+          documentCount: 2,
           lineCount: 2,
           tokenCount: 11,
           vocabSize: 8,
@@ -342,7 +345,7 @@ describe("SidebarEditorView", () => {
         selectedFile={selectedFile}
         selectedFileSummary={{
           characterCount: 9,
-          documents: ["alpha", "beta"],
+          documentCount: 2,
           lineCount: 2,
           tokenCount: 11,
           vocabSize: 8,
@@ -392,7 +395,7 @@ describe("SidebarEditorView", () => {
         selectedFile={selectedFile}
         selectedFileSummary={{
           characterCount: 9,
-          documents: ["alpha", "beta"],
+          documentCount: 2,
           lineCount: 2,
           tokenCount: 11,
           vocabSize: 8,
@@ -403,5 +406,44 @@ describe("SidebarEditorView", () => {
     );
 
     expect(screen.getByRole("button", { name: /finalizing results/i })).toBeTruthy();
+  });
+
+  it("shows a preparing label before the first telemetry sample arrives", () => {
+    const startingRun: TrainingRunRecord = {
+      ...createRun(),
+      status: "starting",
+      telemetry: [],
+    };
+
+    render(
+      <SidebarEditorView
+        canTrain
+        draftContent={selectedFile.content}
+        draftName={selectedFile.name}
+        generationConfig={DEFAULT_GENERATION_CONFIG}
+        isTraining
+        onBack={vi.fn()}
+        onResetLocalData={vi.fn()}
+        onDraftContentChange={vi.fn()}
+        onDraftNameChange={vi.fn()}
+        onGenerationConfigChange={vi.fn()}
+        onResumeTraining={vi.fn()}
+        onStartTraining={vi.fn().mockResolvedValue(undefined)}
+        onTrainingConfigChange={vi.fn()}
+        selectedFile={selectedFile}
+        selectedFileSummary={{
+          characterCount: 9,
+          documentCount: 2,
+          lineCount: 2,
+          tokenCount: 11,
+          vocabSize: 8,
+        }}
+        selectedRun={startingRun}
+        trainingConfig={DEFAULT_TRAINING_CONFIG}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /training in progress/i })).toBeTruthy();
+    expect(screen.getByText("Preparing...")).toBeTruthy();
   });
 });

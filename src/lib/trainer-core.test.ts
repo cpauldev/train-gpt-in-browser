@@ -22,7 +22,7 @@ describe("trainer-core", () => {
   it("summarizes total characters separately from tokenizer size", () => {
     expect(summarizeDatasetText("ab\ncc\n")).toEqual({
       characterCount: 4,
-      documents: ["ab", "cc"],
+      documentCount: 2,
       lineCount: 2,
       tokenCount: 7,
       vocabSize: 4,

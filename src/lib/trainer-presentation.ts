@@ -1,3 +1,6 @@
+import type { TrainingRunStatus, TrainingTelemetryPoint } from "@/lib/trainer-types";
+import { getLatestTrainingTelemetry } from "@/lib/training-telemetry";
+
 export type WorkspaceRuntimeStatus = {
   dotClass: string;
   label: string;
@@ -66,4 +69,57 @@ export function formatTimestamp(value: number): string {
     dateStyle: "medium",
     timeStyle: "medium",
   });
+}
+
+export function getLiveTrainingStatusLabel(points: TrainingTelemetryPoint[]) {
+  const latestPoint = getLatestTrainingTelemetry(points);
+  return formatLiveTrainingStatusLabel({
+    step: latestPoint?.step,
+    totalSteps: latestPoint?.totalSteps,
+  });
+}
+
+export function formatLiveTrainingStatusLabel({
+  step,
+  totalSteps,
+}: {
+  step: number | undefined;
+  totalSteps: number | undefined;
+}) {
+  if (typeof step !== "number" || typeof totalSteps !== "number") {
+    return "Training...";
+  }
+
+  const boundedStep = Math.max(0, Math.min(Math.floor(step), Math.max(totalSteps, 0)));
+  const progressSummary = formatTrainingProgressSummary(boundedStep, totalSteps);
+  return step >= totalSteps
+    ? `Finalizing ${progressSummary}`
+    : `Training ${progressSummary}`;
+}
+
+export function formatTrainingRunStatusLabel(status: Exclude<TrainingRunStatus, "starting" | "training">) {
+  switch (status) {
+    case "completed":
+      return "Completed";
+    case "error":
+      return "Error";
+    case "idle":
+      return "Idle";
+    default: {
+      const exhaustive: never = status;
+      return exhaustive;
+    }
+  }
+}
+
+export function formatTrainingProgressSummary(step: number, totalSteps: number) {
+  return `${formatStepCount(step)}/${formatStepCount(totalSteps)} (${formatTrainingProgressPercent(step, totalSteps)}%)`;
+}
+
+function formatTrainingProgressPercent(step: number, totalSteps: number) {
+  return Math.min(100, Math.max(0, Math.round((step / Math.max(totalSteps, 1)) * 100)));
+}
+
+function formatStepCount(value: number) {
+  return Math.max(0, Math.floor(value)).toLocaleString("en-US");
 }

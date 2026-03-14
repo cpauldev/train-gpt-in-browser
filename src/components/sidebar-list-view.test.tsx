@@ -17,7 +17,7 @@ function createFile(overrides: Partial<WorkspaceFile> = {}): WorkspaceFile {
   };
 }
 
-function createRun(): TrainingRunRecord {
+function createRun(overrides: Partial<TrainingRunRecord> = {}): TrainingRunRecord {
   return {
     checkpoint: {
       datasetData: new Int32Array([1, 2, 3]),
@@ -83,6 +83,7 @@ function createRun(): TrainingRunRecord {
     telemetry: [],
     trainingConfig: DEFAULT_TRAINING_CONFIG,
     updatedAt: Date.now(),
+    ...overrides,
   };
 }
 
@@ -114,7 +115,23 @@ describe("SidebarListView", () => {
     expect(onImportClick).toHaveBeenCalledOnce();
     expect(onOpenFile).toHaveBeenCalledWith(file);
     expect(screen.getByText(/custom local dataset/i)).toBeTruthy();
-    expect(screen.getByText(/completed/i)).toBeTruthy();
+    expect(screen.getByText("Completed")).toBeTruthy();
+  });
+
+  it("title-cases non-live status badges", () => {
+    render(
+      <SidebarListView
+        files={[createFile()]}
+        isHydrating={false}
+        onCreateFile={vi.fn()}
+        onResetLocalData={vi.fn()}
+        onImportClick={vi.fn()}
+        onOpenFile={vi.fn().mockResolvedValue(undefined)}
+        runs={[createRun({ status: "idle" })]}
+      />,
+    );
+
+    expect(screen.getByText("Idle")).toBeTruthy();
   });
 
   it("shows the empty dataset state when there are no files", () => {
@@ -151,5 +168,58 @@ describe("SidebarListView", () => {
 
     expect(screen.getByText(/loading local data/i)).toBeTruthy();
     expect(screen.getByText(/loading datasets and saved runs from this browser/i)).toBeTruthy();
+  });
+
+  it("shows live training progress in the dataset badge while a run is active", () => {
+    render(
+      <SidebarListView
+        files={[createFile()]}
+        isHydrating={false}
+        onCreateFile={vi.fn()}
+        onResetLocalData={vi.fn()}
+        onImportClick={vi.fn()}
+        onOpenFile={vi.fn().mockResolvedValue(undefined)}
+        runs={[
+          createRun({
+            status: "training",
+            telemetry: [
+              {
+                elapsedTimeSeconds: 12,
+                loss: 1.2345,
+                step: 420,
+                stepsPerSecond: 3.5,
+                time: 12,
+                tokPerSecond: 256,
+                totalSteps: 3_000,
+                totalTokens: 1_024,
+              },
+            ],
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Training 420/3,000 (14%)")).toBeTruthy();
+  });
+
+  it("shows a preparing badge before training telemetry starts", () => {
+    render(
+      <SidebarListView
+        files={[createFile()]}
+        isHydrating={false}
+        onCreateFile={vi.fn()}
+        onResetLocalData={vi.fn()}
+        onImportClick={vi.fn()}
+        onOpenFile={vi.fn().mockResolvedValue(undefined)}
+        runs={[
+          createRun({
+            status: "starting",
+            telemetry: [],
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Preparing...")).toBeTruthy();
   });
 });

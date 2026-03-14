@@ -310,6 +310,14 @@ export class BrowserTrainer {
       completedSteps = completedStepsBefore + step + 1;
       totalTokens += this.trainingConfig.batchSize * this.trainingConfig.model.blockSize;
       const now = performance.now();
+      this.resumeState = {
+        completedSteps,
+        elapsedTrainingSeconds:
+          elapsedTrainingSecondsBefore + Math.max((now - startedAt) / 1000, 1e-9),
+        finalLoss,
+        lastSavedAt: this.resumeState.lastSavedAt,
+        totalTokens,
+      };
 
       if (onTelemetry && (now - lastTelemetryAt >= 250 || step + 1 === remainingTrainingSteps)) {
         const elapsedSeconds = Math.max((now - lastTelemetryAt) / 1000, 1e-9);
@@ -913,27 +921,17 @@ async function serializeCheckpoint({
   rngState: number;
   trainingConfig: TrainingConfig;
 }): Promise<SerializedCheckpoint> {
-  const weights = await Promise.all(
+  const serialized = await Promise.all(
     model.ordered.map(async (item) => ({
       name: item.name,
-      shape: [...item.variable.shape],
-      values: new Float32Array(await item.variable.data()),
+      weight: { shape: [...item.variable.shape], values: new Float32Array(await item.variable.data()) },
+      firstMoment: { shape: [...item.firstMoment.shape], values: new Float32Array(await item.firstMoment.data()) },
+      secondMoment: { shape: [...item.secondMoment.shape], values: new Float32Array(await item.secondMoment.data()) },
     })),
   );
-  const firstMoments = await Promise.all(
-    model.ordered.map(async (item) => ({
-      name: item.name,
-      shape: [...item.firstMoment.shape],
-      values: new Float32Array(await item.firstMoment.data()),
-    })),
-  );
-  const secondMoments = await Promise.all(
-    model.ordered.map(async (item) => ({
-      name: item.name,
-      shape: [...item.secondMoment.shape],
-      values: new Float32Array(await item.secondMoment.data()),
-    })),
-  );
+  const weights = serialized.map((item) => ({ name: item.name, ...item.weight }));
+  const firstMoments = serialized.map((item) => ({ name: item.name, ...item.firstMoment }));
+  const secondMoments = serialized.map((item) => ({ name: item.name, ...item.secondMoment }));
 
   return {
     datasetData: new Int32Array(dataset.data),

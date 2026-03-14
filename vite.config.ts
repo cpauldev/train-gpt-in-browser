@@ -80,6 +80,17 @@ export default defineConfig({
       },
     },
   },
+  optimizeDeps: {
+    include: [
+      "@codemirror/commands",
+      "@codemirror/state",
+      "@codemirror/view",
+      "@noble/hashes/sha256",
+      "@tensorflow/tfjs",
+      "@tensorflow/tfjs-backend-cpu",
+      "@tensorflow/tfjs-backend-webgpu",
+    ],
+  },
   worker: {
     format: "es",
   },

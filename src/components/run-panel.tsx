@@ -10,7 +10,6 @@ import { Frame, FrameHeader, FramePanel, FrameTitle } from "@/components/ui/fram
 import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from "@/components/ui/preview-card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider, SliderValue } from "@/components/ui/slider";
-import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip";
@@ -145,6 +144,8 @@ function HeroPanelFrame({
   repoUrl: string;
   runtimeStatus: ReturnType<typeof getWorkspaceRuntimeStatus>;
 }) {
+  const runtimeIsLoading = runtimeStatus.label !== "Runtime ready";
+
   return (
     <Frame className="h-full overflow-hidden lg:min-h-0">
       <FramePanel className="flex flex-1 flex-col overflow-hidden p-0 lg:min-h-0">
@@ -229,7 +230,14 @@ function HeroPanelFrame({
               <TooltipTrigger
                 render={
                   <Button variant="outline" className="min-w-0 w-full gap-2 lg:flex-1" disabled>
-                    <span className={cn("size-2 rounded-full", runtimeStatus.dotClass)} />
+                    <span
+                      className={cn(
+                        "size-2 rounded-full",
+                        runtimeIsLoading
+                          ? "animate-pulse bg-muted-foreground/60"
+                          : runtimeStatus.dotClass,
+                      )}
+                    />
                     {runtimeStatus.label}
                   </Button>
                 }
@@ -394,16 +402,7 @@ function ActiveRunPanelFrame({
           size="xl"
           className="w-full"
         >
-          {isGenerating ? (
-            <>
-              <Spinner />
-              Generating
-            </>
-          ) : isTraining ? (
-            "Training"
-          ) : (
-            "Generate"
-          )}
+          {isGenerating ? "Generating..." : isTraining ? "Training" : "Generate"}
         </Button>
       </FramePanel>
 

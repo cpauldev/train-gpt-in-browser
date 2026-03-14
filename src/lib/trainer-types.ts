@@ -1,6 +1,6 @@
 export type BuiltInDatasetKey = "english_words" | "us_baby_names";
 export type WorkspaceFileSource = "builtin" | "user";
-export type TrainingRunStatus = "idle" | "training" | "completed" | "error";
+export type TrainingRunStatus = "idle" | "starting" | "training" | "completed" | "error";
 export type BackendPreference = "auto" | "webgpu" | "cpu";
 export type ResolvedBackend = "webgpu" | "cpu";
 export type LogKind = "section" | "line" | "success" | "error";
@@ -53,7 +53,7 @@ export type DatasetStats = {
 
 export type DatasetTextSummary = {
   characterCount: number;
-  documents: string[];
+  documentCount: number;
   lineCount: number;
   tokenCount: number;
   vocabSize: number;
@@ -347,6 +347,7 @@ export function getTrainingRunStatusBadgeVariant(status: TrainingRunStatus) {
   switch (status) {
     case "completed":
       return "success";
+    case "starting":
     case "training":
       return "warning";
     case "error":
@@ -356,8 +357,12 @@ export function getTrainingRunStatusBadgeVariant(status: TrainingRunStatus) {
   }
 }
 
+export function isTrainingRunInProgress(status: TrainingRunStatus) {
+  return status === "starting" || status === "training";
+}
+
 export function hasTrainingRun(runs: Array<Pick<TrainingRunRecord, "status">>) {
-  return runs.some((run) => run.status === "training");
+  return runs.some((run) => isTrainingRunInProgress(run.status));
 }
 
 export function getTrainingRunCompletedSteps(
@@ -389,7 +394,7 @@ export function canResumeTrainingRun(
   >,
   requestedSteps = run.trainingConfig.steps,
 ) {
-  if (run.status === "training") {
+  if (isTrainingRunInProgress(run.status)) {
     return false;
   }
 

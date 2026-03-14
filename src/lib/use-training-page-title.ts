@@ -1,7 +1,8 @@
 import { type MutableRefObject, useEffect, useMemo, useRef } from "react";
-import type { TrainingRunRecord } from "@/lib/trainer-types";
+import { isTrainingRunInProgress, type TrainingRunRecord } from "@/lib/trainer-types";
 import { getLatestTrainingTelemetry } from "@/lib/training-telemetry";
 
+export const APP_PAGE_TITLE = "Train GPT in Browser";
 export const TRAINING_PAGE_TITLE_RESET_DELAY_MS = 3_500;
 
 export function useTrainingPageTitle({
@@ -11,7 +12,7 @@ export function useTrainingPageTitle({
   fileTitle?: string;
   run: TrainingRunRecord | null;
 }) {
-  const defaultTitleRef = useRef(typeof document === "undefined" ? "" : document.title);
+  const baseTitleRef = useRef(APP_PAGE_TITLE);
   const completionHoldRunIdRef = useRef<string | null>(null);
   const completionTimeoutRef = useRef<number | null>(null);
   const previousRunStateRef = useRef<{
@@ -22,21 +23,28 @@ export function useTrainingPageTitle({
     status: null,
   });
 
-  const latestPoint = useMemo(() => getLatestTrainingTelemetry(run?.telemetry ?? []), [run]);
   const liveTrainingTitle = useMemo(
     () =>
       buildLiveTrainingPageTitle({
-        defaultTitle: defaultTitleRef.current,
+        baseTitle: baseTitleRef.current,
         fileTitle,
-        latestPoint,
         run,
       }),
-    [fileTitle, latestPoint, run],
+    [fileTitle, run],
+  );
+  const idlePageTitle = useMemo(
+    () =>
+      buildIdlePageTitle({
+        baseTitle: baseTitleRef.current,
+        fileTitle,
+        run,
+      }),
+    [fileTitle, run],
   );
   const completedTrainingTitle = useMemo(
     () =>
       buildCompletedTrainingPageTitle({
-        defaultTitle: defaultTitleRef.current,
+        baseTitle: baseTitleRef.current,
         fileTitle,
         run,
       }),
@@ -47,14 +55,15 @@ export function useTrainingPageTitle({
     const previousRunState = previousRunStateRef.current;
     const justCompleted =
       previousRunState.id === run?.id &&
-      previousRunState.status === "training" &&
+      previousRunState.status !== null &&
+      isTrainingRunInProgress(previousRunState.status) &&
       run?.status === "completed";
     const holdingCompletedTitle =
       completionHoldRunIdRef.current === run?.id &&
       run?.status === "completed" &&
       completionTimeoutRef.current !== null;
 
-    if (run?.status === "training") {
+    if (run && isTrainingRunInProgress(run.status)) {
       clearCompletionTitle({
         completionHoldRunIdRef,
         completionTimeoutRef,
@@ -72,21 +81,21 @@ export function useTrainingPageTitle({
           completionHoldRunIdRef,
           completionTimeoutRef,
         });
-        document.title = defaultTitleRef.current;
+        document.title = idlePageTitle;
       }, TRAINING_PAGE_TITLE_RESET_DELAY_MS);
     } else if (!holdingCompletedTitle) {
       clearCompletionTitle({
         completionHoldRunIdRef,
         completionTimeoutRef,
       });
-      document.title = defaultTitleRef.current;
+      document.title = idlePageTitle;
     }
 
     previousRunStateRef.current = {
       id: run?.id ?? null,
       status: run?.status ?? null,
     };
-  }, [completedTrainingTitle, liveTrainingTitle, run?.id, run?.status]);
+  }, [completedTrainingTitle, idlePageTitle, liveTrainingTitle, run?.id, run?.status]);
 
   useEffect(() => {
     return () => {
@@ -94,44 +103,46 @@ export function useTrainingPageTitle({
         completionHoldRunIdRef,
         completionTimeoutRef,
       });
-      document.title = defaultTitleRef.current;
+      document.title = baseTitleRef.current;
     };
   }, []);
 }
 
 export function buildCompletedTrainingPageTitle({
-  defaultTitle,
+  baseTitle,
   fileTitle,
   run,
 }: {
-  defaultTitle: string;
+  baseTitle: string;
   fileTitle?: string;
   run: TrainingRunRecord | null;
 }) {
-  return joinTitleSegments("Training complete", resolveRunLabel(run, fileTitle), defaultTitle);
+  return joinTitleSegments("Training complete", resolveRunLabel(run, fileTitle), baseTitle);
 }
 
 export function buildLiveTrainingPageTitle({
-  defaultTitle,
+  baseTitle,
   fileTitle,
-  latestPoint,
   run,
 }: {
-  defaultTitle: string;
+  baseTitle: string;
   fileTitle?: string;
-  latestPoint: ReturnType<typeof getLatestTrainingTelemetry>;
   run: TrainingRunRecord | null;
 }) {
-  const progressSummary = latestPoint
-    ? formatProgressSummary(latestPoint.step, latestPoint.totalSteps)
-    : null;
-  const statusLabel = !latestPoint
-    ? "Training..."
-    : latestPoint.step >= latestPoint.totalSteps
-      ? `Finalizing ${progressSummary}`
-      : `Training ${progressSummary}`;
+  const statusLabel = getLiveTrainingTitleLabel(run);
+  return joinTitleSegments(statusLabel, resolveRunLabel(run, fileTitle), baseTitle);
+}
 
-  return joinTitleSegments(statusLabel, resolveRunLabel(run, fileTitle), defaultTitle);
+export function buildIdlePageTitle({
+  baseTitle,
+  fileTitle,
+  run,
+}: {
+  baseTitle: string;
+  fileTitle?: string;
+  run: TrainingRunRecord | null;
+}) {
+  return joinTitleSegments(resolveRunLabel(run, fileTitle), baseTitle);
 }
 
 function resolveRunLabel(run: TrainingRunRecord | null, fileTitle?: string) {
@@ -148,20 +159,27 @@ function resolveRunLabel(run: TrainingRunRecord | null, fileTitle?: string) {
   return run?.fileName.replace(/\.txt$/iu, "").trim() ?? "";
 }
 
-function formatProgressPercent(step: number, totalSteps: number) {
-  return Math.min(100, Math.max(0, Math.round((step / Math.max(totalSteps, 1)) * 100)));
-}
-
-function formatProgressSummary(step: number, totalSteps: number) {
-  return `${formatStepCount(step)}/${formatStepCount(totalSteps)} (${formatProgressPercent(step, totalSteps)}%)`;
-}
-
-function formatStepCount(value: number) {
-  return Math.max(0, Math.floor(value)).toLocaleString("en-US");
-}
-
 function joinTitleSegments(...segments: Array<string | null | undefined>) {
   return segments.filter(Boolean).join(" • ");
+}
+
+function getLiveTrainingTitleLabel(run: TrainingRunRecord | null) {
+  if (run?.status === "starting") {
+    return "Preparing training";
+  }
+
+  const latestPoint = getLatestTrainingTelemetry(run?.telemetry ?? []);
+  if (!latestPoint) {
+    return "Training...";
+  }
+
+  const progressPercent = Math.min(
+    100,
+    Math.max(0, Math.round((latestPoint.step / Math.max(latestPoint.totalSteps, 1)) * 100)),
+  );
+  return latestPoint.step >= latestPoint.totalSteps
+    ? `Finalizing ${progressPercent}%`
+    : `Training ${progressPercent}%`;
 }
 
 function clearCompletionTitle({

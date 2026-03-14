@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { preloadCodeEditorSurface } from "@/components/sidebar-editor-view";
 import { formatTemperatureKey } from "@/lib/trainer-core";
-import { canResumeTrainingRun, createGenerationConfig } from "@/lib/trainer-types";
+import {
+  canResumeTrainingRun,
+  createGenerationConfig,
+  isTrainingRunInProgress,
+} from "@/lib/trainer-types";
 import type { BrowserTrainerController } from "@/lib/use-browser-trainer";
 
 type SidebarMode = "editor" | "list";
@@ -17,10 +22,11 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
   const selectedFileName = workspace.selectedFile?.name ?? "";
   const selectedFileContent = workspace.selectedFile?.content ?? "";
   const isEditorOpen = sidebarMode === "editor";
-  const visibleActiveRun = isEditorOpen && runs.active?.status !== "training" ? runs.active : null;
-  const activeRunTitle = isEditorOpen
-    ? (workspace.selectedFile?.title ?? workspace.selectedFile?.name ?? runs.active?.name ?? "")
-    : "";
+  const isSelectedRunTraining = selectedRun ? isTrainingRunInProgress(selectedRun.status) : false;
+  const completedActiveRun =
+    isEditorOpen && runs.active?.status === "completed" ? runs.active : null;
+  const activeRunTitle =
+    workspace.selectedFile?.title ?? workspace.selectedFile?.name ?? completedActiveRun?.name ?? "";
   const canResumeSelectedRun =
     selectedRun && canResumeTrainingRun(selectedRun, training.config.steps);
 
@@ -42,6 +48,14 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
     setDraftName(selectedFileName);
     setDraftContent(selectedFileContent);
   }, [selectedFileContent, selectedFileName, workspace.selectedFileId]);
+
+  useEffect(() => {
+    if (workspace.files.length === 0) {
+      return;
+    }
+
+    void preloadCodeEditorSurface();
+  }, [workspace.files.length]);
 
   useEffect(() => {
     if (
@@ -74,14 +88,14 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
   }, [draftName, sidebarMode, workspace.selectedFile]);
 
   const displayedResults = useMemo(() => {
-    if (!visibleActiveRun) {
+    if (!completedActiveRun) {
       return [];
     }
 
     return (
-      visibleActiveRun.generatedResults[formatTemperatureKey(generation.config.temperature)] ?? []
+      completedActiveRun.generatedResults[formatTemperatureKey(generation.config.temperature)] ?? []
     );
-  }, [generation.config.temperature, visibleActiveRun]);
+  }, [completedActiveRun, generation.config.temperature]);
 
   const persistDraftFile = useCallback(async () => {
     if (!workspace.selectedFile) {
@@ -149,7 +163,6 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
       await runs.start(file);
     }
   }, [persistDraftFile, runs]);
-
   const handleImportedFiles = useCallback(
     async (fileList: FileList | null) => {
       if (!fileList?.length) {
@@ -173,11 +186,11 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
 
   return {
     editorViewProps: {
-      canTrain: Boolean(workspace.selectedFile && workspace.selectedFileSummary?.documents.length),
+      canTrain: Boolean(workspace.selectedFile && workspace.selectedFileSummary?.documentCount),
       draftContent,
       draftName,
       generationConfig: generation.config,
-      isTraining: training.hasActiveTraining,
+      isTraining: isSelectedRunTraining,
       onBack: handleCloseEditor,
       onResetLocalData: () => setResetDialogOpen(true),
       onDeleteFile:
@@ -218,7 +231,7 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
     },
     resetDialogOpen,
     runPanelProps: {
-      activeRun: visibleActiveRun,
+      activeRun: completedActiveRun,
       activeTab: generation.activeTab,
       displayTitle: activeRunTitle,
       displayedResults,

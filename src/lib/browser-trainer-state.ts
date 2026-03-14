@@ -67,7 +67,7 @@ export function reconcileInterruptedRuns(runs: TrainingRunRecord[], updatedAt = 
   const updatedRuns: TrainingRunRecord[] = [];
 
   const nextRuns = runs.map((run) => {
-    if (run.status !== "training") {
+    if (run.status !== "starting" && run.status !== "training") {
       return run;
     }
 

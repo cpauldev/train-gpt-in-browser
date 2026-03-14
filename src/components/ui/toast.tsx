@@ -17,7 +17,6 @@ const anchoredToastManager = Toast.createToastManager();
 const TOAST_ICONS = {
   error: CircleAlertIcon,
   info: InfoIcon,
-  loading: LoaderCircleIcon,
   success: CircleCheckIcon,
   warning: TriangleAlertIcon,
 } as const;
@@ -64,6 +63,7 @@ function Toasts({ position = "bottom-right" }: { position: ToastPosition }) {
         data-slot="toast-viewport"
       >
         {toasts.map((toast) => {
+          const isLoading = toast.type === "loading";
           const Icon = toast.type ? TOAST_ICONS[toast.type as keyof typeof TOAST_ICONS] : null;
 
           return (
@@ -122,12 +122,16 @@ function Toasts({ position = "bottom-right" }: { position: ToastPosition }) {
             >
               <Toast.Content className="pointer-events-auto flex items-center justify-between gap-1.5 overflow-hidden px-3.5 py-3 text-sm transition-opacity duration-250 data-behind:not-data-expanded:pointer-events-none data-behind:opacity-0 data-expanded:opacity-100">
                 <div className="flex gap-2">
-                  {Icon && (
+                  {(isLoading || Icon) && (
                     <div
                       className="[&>svg]:h-lh [&>svg]:w-4 [&_svg]:pointer-events-none [&_svg]:shrink-0"
                       data-slot="toast-icon"
                     >
-                      <Icon className="in-data-[type=loading]:animate-spin in-data-[type=error]:text-destructive in-data-[type=info]:text-info in-data-[type=success]:text-success in-data-[type=warning]:text-warning in-data-[type=loading]:opacity-80" />
+                      {isLoading ? (
+                        <LoaderCircleIcon className="mt-1 animate-spin" />
+                      ) : (
+                        <Icon className="in-data-[type=error]:text-destructive in-data-[type=info]:text-info in-data-[type=success]:text-success in-data-[type=warning]:text-warning" />
+                      )}
                     </div>
                   )}
 
@@ -169,6 +173,7 @@ function AnchoredToasts() {
     <Toast.Portal data-slot="toast-portal-anchored">
       <Toast.Viewport className="outline-none" data-slot="toast-viewport-anchored">
         {toasts.map((toast) => {
+          const isLoading = toast.type === "loading";
           const Icon = toast.type ? TOAST_ICONS[toast.type as keyof typeof TOAST_ICONS] : null;
           const tooltipStyle = (toast.data as { tooltipStyle?: boolean })?.tooltipStyle ?? false;
           const positionerProps = toast.positionerProps;
@@ -202,12 +207,16 @@ function AnchoredToasts() {
                 ) : (
                   <Toast.Content className="pointer-events-auto flex items-center justify-between gap-1.5 overflow-hidden px-3.5 py-3 text-sm">
                     <div className="flex gap-2">
-                      {Icon && (
+                      {(isLoading || Icon) && (
                         <div
                           className="[&>svg]:h-lh [&>svg]:w-4 [&_svg]:pointer-events-none [&_svg]:shrink-0"
                           data-slot="toast-icon"
                         >
-                          <Icon className="in-data-[type=loading]:animate-spin in-data-[type=error]:text-destructive in-data-[type=info]:text-info in-data-[type=success]:text-success in-data-[type=warning]:text-warning in-data-[type=loading]:opacity-80" />
+                          {isLoading ? (
+                            <LoaderCircleIcon className="mt-1 animate-spin" />
+                          ) : (
+                            <Icon className="in-data-[type=error]:text-destructive in-data-[type=info]:text-info in-data-[type=success]:text-success in-data-[type=warning]:text-warning" />
+                          )}
                         </div>
                       )}
 

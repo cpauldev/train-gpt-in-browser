@@ -88,31 +88,37 @@ export async function seedBuiltinWorkspaceFiles() {
   const db = await getTrainerDb();
   const existingFiles = await db.getAll("files");
   const existingBuiltInKeys = new Set(existingFiles.map((file) => file.builtInKey).filter(Boolean));
+  const missingDatasets = BUILTIN_DATASETS.filter(
+    (dataset) => !existingBuiltInKeys.has(dataset.key),
+  );
 
-  for (const dataset of BUILTIN_DATASETS) {
-    if (existingBuiltInKeys.has(dataset.key)) {
-      continue;
-    }
-
-    const response = await fetch(resolveBasePath(dataset.publicPath));
-    if (!response.ok) {
-      throw new Error(`Failed to load built-in dataset: ${dataset.fileName}`);
-    }
-
-    const content = await response.text();
-    const now = Date.now();
-    await db.put("files", {
-      builtInKey: dataset.key,
-      content,
-      createdAt: now,
-      description: dataset.description,
-      id: dataset.id,
-      name: dataset.fileName,
-      source: "builtin",
-      title: dataset.title,
-      updatedAt: now,
-    });
+  if (missingDatasets.length === 0) {
+    return;
   }
+
+  const seededFiles = await Promise.all(
+    missingDatasets.map(async (dataset) => {
+      const response = await fetch(resolveBasePath(dataset.publicPath));
+      if (!response.ok) {
+        throw new Error(`Failed to load built-in dataset: ${dataset.fileName}`);
+      }
+
+      const now = Date.now();
+      return {
+        builtInKey: dataset.key,
+        content: await response.text(),
+        createdAt: now,
+        description: dataset.description,
+        id: dataset.id,
+        name: dataset.fileName,
+        source: "builtin" as const,
+        title: dataset.title,
+        updatedAt: now,
+      };
+    }),
+  );
+
+  await Promise.all(seededFiles.map((file) => db.put("files", file)));
 }
 
 export async function listWorkspaceFiles() {
@@ -366,8 +372,8 @@ export async function resetTrainerStorage() {
     transaction.objectStore("checkpoints").clear(),
     transaction.objectStore("files").clear(),
     transaction.objectStore("runs").clear(),
-    transaction.done,
   ]);
+  await transaction.done;
   await Promise.all(artifacts.map(deleteStoredArtifactFile));
 }
 

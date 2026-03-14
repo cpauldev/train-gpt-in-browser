@@ -1,12 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrainingLiveStats } from "@/components/training-live-stats";
 import { DEFAULT_TRAINING_CONFIG } from "@/lib/trainer-defaults";
 import type { TrainingRunRecord } from "@/lib/trainer-types";
 
 let mockResolvedTheme: "light" | "dark" = "light";
+let livelineMountCount = 0;
 
 vi.mock("@/lib/app-theme", () => ({
   useAppTheme: () => ({
@@ -22,18 +23,26 @@ vi.mock("liveline", () => ({
     color,
     data,
     formatTime,
+    paused,
   }: {
     color: string;
     data: Array<{ time: number; value: number }>;
     formatTime?: (time: number) => string;
+    paused?: boolean;
   }) => {
-    const [initialSeries] = useState(() =>
-      data.map((point) => `${point.time}:${point.value}`).join("|"),
-    );
+    const mountIdRef = useRef<number | null>(null);
+    if (mountIdRef.current === null) {
+      mountIdRef.current = ++livelineMountCount;
+    }
+    const series = data.map((point) => `${point.time}:${point.value}`).join("|");
     const latestTime = data.at(-1)?.time;
     const formattedTime =
       typeof latestTime === "number" && formatTime ? formatTime(latestTime) : "";
-    return <div data-testid="liveline">{`${initialSeries}:${color}:${formattedTime}`}</div>;
+    return (
+      <div data-mount-id={String(mountIdRef.current)} data-testid="liveline">
+        {`${series}:${color}:${formattedTime}:${paused ? "paused" : "live"}`}
+      </div>
+    );
   },
 }));
 
@@ -82,8 +91,15 @@ function createRun(): TrainingRunRecord {
   };
 }
 
+function parseLivelineTimes() {
+  const text = screen.getByTestId("liveline").textContent ?? "";
+  const [series] = text.split(":#");
+  return series.split("|").map((entry) => Number(entry.split(":")[0]));
+}
+
 afterEach(() => {
   mockResolvedTheme = "light";
+  livelineMountCount = 0;
 });
 
 describe("TrainingLiveStats", () => {
@@ -103,65 +119,39 @@ describe("TrainingLiveStats", () => {
     expect(screen.getByText("2 / 100 (2%)")).toBeTruthy();
   });
 
-  it("remounts the chart when switching metrics so completed runs show the correct series", async () => {
+  it("keeps the same completed-run timeline when switching metrics", async () => {
     const user = userEvent.setup();
-    const dateNowSpy = vi.spyOn(Date, "now");
-    dateNowSpy.mockReturnValue(12_000);
 
     render(<TrainingLiveStats isTraining={false} run={createRun()} />);
 
-    expect(screen.getByTestId("liveline").textContent).toBe("11:1.5|12:1.25:#eb6f36:0:02");
+    expect(screen.getByTestId("liveline").textContent).toContain(":#eb6f36:0:02:paused");
 
-    // Switching metrics re-anchors data to Date.now() so Liveline's fresh internal clock
-    // (also initialized to Date.now()) matches the latest data point time.
-    dateNowSpy.mockReturnValue(30_000);
     await user.click(screen.getByRole("button", { name: "Tokens/s" }));
-    expect(screen.getByTestId("liveline").textContent).toBe("29:128|30:256:#2f8f5b:0:02");
+    expect(screen.getByTestId("liveline").textContent).toContain(":#2f8f5b:0:02:paused");
 
-    dateNowSpy.mockReturnValue(45_000);
     await user.click(screen.getByRole("button", { name: "Steps/s" }));
-    expect(screen.getByTestId("liveline").textContent).toBe("44:2.5|45:3.25:#3a76f0:0:02");
-
-    dateNowSpy.mockRestore();
+    expect(screen.getByTestId("liveline").textContent).toContain(":#3a76f0:0:02:paused");
   });
 
   it("preserves elapsed training time when switching metrics after a delay on a completed run", async () => {
     const user = userEvent.setup();
-    const dateNowSpy = vi.spyOn(Date, "now");
-
-    // Page loads 1 minute after training finished (the run still shows 2s of elapsed time).
-    dateNowSpy.mockReturnValue(12_000);
     render(<TrainingLiveStats isTraining={false} run={createRun()} />);
-    expect(screen.getByTestId("liveline").textContent).toBe("11:1.5|12:1.25:#eb6f36:0:02");
+    expect(screen.getByTestId("liveline").textContent).toContain(":0:02:paused");
 
-    // Wait another minute, then switch metrics. Without the fix, Liveline would remount
-    // with its internal clock at Date.now() = 72s while data was still anchored to 12s,
-    // making the right edge of the chart show "1:02" (62 extra seconds) instead of "0:02".
-    dateNowSpy.mockReturnValue(72_000);
     await user.click(screen.getByRole("button", { name: "Tokens/s" }));
-
-    // Data point times must be re-anchored to the new Date.now() (72s) so Liveline's
-    // fresh clock matches the latest point and the elapsed timer stays correct.
-    expect(screen.getByTestId("liveline").textContent).toBe("71:128|72:256:#2f8f5b:0:02");
-
-    dateNowSpy.mockRestore();
+    expect(screen.getByTestId("liveline").textContent).toContain(":0:02:paused");
   });
 
-  it("re-anchors completed-run data when the theme changes and remounts the chart", () => {
-    const dateNowSpy = vi.spyOn(Date, "now");
+  it("keeps the frozen chart timeline stable when the theme changes", () => {
     const run = createRun();
 
     mockResolvedTheme = "light";
-    dateNowSpy.mockReturnValue(12_000);
     const { rerender } = render(<TrainingLiveStats isTraining={false} run={run} />);
-    expect(screen.getByTestId("liveline").textContent).toBe("11:1.5|12:1.25:#eb6f36:0:02");
+    expect(screen.getByTestId("liveline").textContent).toContain(":#eb6f36:0:02:paused");
 
     mockResolvedTheme = "dark";
-    dateNowSpy.mockReturnValue(72_000);
     rerender(<TrainingLiveStats isTraining={false} run={run} />);
-    expect(screen.getByTestId("liveline").textContent).toBe("71:1.5|72:1.25:#eb6f36:0:02");
-
-    dateNowSpy.mockRestore();
+    expect(screen.getByTestId("liveline").textContent).toContain(":#eb6f36:0:02:paused");
   });
 
   it("uses cumulative elapsed training time instead of wall-clock gaps", () => {
@@ -191,7 +181,131 @@ describe("TrainingLiveStats", () => {
 
     render(<TrainingLiveStats isTraining={false} run={run} />);
 
-    expect(screen.getByTestId("liveline").textContent).toBe("15:1.5|20:1.25:#eb6f36:0:10");
+    expect(screen.getByTestId("liveline").textContent).toBe("15:1.5|20:1.25:#eb6f36:0:10:paused");
     dateNowSpy.mockRestore();
+  });
+
+  it("keeps the live chart anchored to elapsed training time", () => {
+    const liveRun = createRun();
+    liveRun.status = "training";
+    liveRun.telemetry = [
+      {
+        elapsedTimeSeconds: 1,
+        loss: 1.5,
+        step: 1,
+        stepsPerSecond: 2.5,
+        time: 11,
+        tokPerSecond: 128,
+        totalSteps: 100,
+        totalTokens: 32,
+      },
+      {
+        elapsedTimeSeconds: 2,
+        loss: 1.25,
+        step: 2,
+        stepsPerSecond: 3.25,
+        time: 12,
+        tokPerSecond: 256,
+        totalSteps: 100,
+        totalTokens: 64,
+      },
+      {
+        elapsedTimeSeconds: 3,
+        loss: 1.1,
+        step: 3,
+        stepsPerSecond: 3.1,
+        time: 10_000,
+        tokPerSecond: 320,
+        totalSteps: 100,
+        totalTokens: 96,
+      },
+    ];
+
+    render(<TrainingLiveStats isTraining={true} run={liveRun} />);
+
+    expect(parseLivelineTimes()).toEqual([9998, 9999, 10000]);
+    expect(screen.getByTestId("liveline").textContent).toContain(":0:03:live");
+  });
+
+  it("keeps the same chart instance when switching time windows", async () => {
+    const user = userEvent.setup();
+
+    render(<TrainingLiveStats isTraining={false} run={createRun()} />);
+
+    const chart = screen.getByTestId("liveline");
+    const mountId = chart.getAttribute("data-mount-id");
+    expect(mountId).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "5m" }));
+
+    expect(screen.getByTestId("liveline").getAttribute("data-mount-id")).toBe(mountId);
+  });
+
+  it("keeps non-live timelines static", () => {
+    const dateNowSpy = vi.spyOn(Date, "now");
+    dateNowSpy.mockReturnValue(12_000);
+    const incompleteRun = createRun();
+    incompleteRun.status = "idle";
+    incompleteRun.telemetry = [
+      {
+        elapsedTimeSeconds: 1,
+        loss: 1.5,
+        step: 1,
+        stepsPerSecond: 2.5,
+        time: 11,
+        tokPerSecond: 128,
+        totalSteps: 100,
+        totalTokens: 32,
+      },
+      {
+        elapsedTimeSeconds: 2,
+        loss: 1.25,
+        step: 2,
+        stepsPerSecond: 3.25,
+        time: 12,
+        tokPerSecond: 256,
+        totalSteps: 100,
+        totalTokens: 64,
+      },
+    ];
+
+    render(<TrainingLiveStats isTraining={false} run={incompleteRun} />);
+    expect(parseLivelineTimes()).toEqual([11, 12]);
+    expect(screen.getByTestId("liveline").textContent).toContain(":0:02:paused");
+    dateNowSpy.mockRestore();
+  });
+
+  it("keeps the same chart instance while training state changes", () => {
+    const queuedRun = createRun();
+    queuedRun.status = "starting";
+    queuedRun.telemetry = [
+      {
+        elapsedTimeSeconds: 1,
+        loss: 1.5,
+        step: 1,
+        stepsPerSecond: 2.5,
+        time: 11,
+        tokPerSecond: 128,
+        totalSteps: 100,
+        totalTokens: 32,
+      },
+      {
+        elapsedTimeSeconds: 2,
+        loss: 1.25,
+        step: 2,
+        stepsPerSecond: 3.25,
+        time: 12,
+        tokPerSecond: 256,
+        totalSteps: 100,
+        totalTokens: 64,
+      },
+    ];
+
+    const { rerender } = render(<TrainingLiveStats isTraining={true} run={queuedRun} />);
+    const mountId = screen.getByTestId("liveline").getAttribute("data-mount-id");
+    expect(mountId).toBeTruthy();
+
+    rerender(<TrainingLiveStats isTraining={true} run={{ ...queuedRun, status: "training" }} />);
+    expect(screen.getByTestId("liveline").getAttribute("data-mount-id")).toBe(mountId);
   });
 });

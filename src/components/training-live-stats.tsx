@@ -11,7 +11,7 @@ import {
   ProgressTrack,
 } from "@/components/ui/progress";
 import { useAppTheme } from "@/lib/app-theme";
-import type { TrainingRunRecord } from "@/lib/trainer-types";
+import type { TrainingRunRecord, TrainingTelemetryPoint } from "@/lib/trainer-types";
 import {
   getLatestTrainingTelemetry,
   resolveTrainingTelemetryTimeline,
@@ -19,11 +19,7 @@ import {
 import { useAnimatedValue } from "@/lib/use-animated-value";
 
 type TrainingMetricKey = "loss" | "stepsPerSecond" | "tokPerSecond";
-type ChartTelemetryPoint = {
-  elapsedTimeSeconds?: number;
-  time: number;
-};
-
+type ChartTelemetryPoint = Pick<TrainingTelemetryPoint, "elapsedTimeSeconds" | "step" | "time">;
 const METRIC_OPTIONS: Array<{
   accent: string;
   label: string;
@@ -59,10 +55,6 @@ export function TrainingLiveStats({
   run: TrainingRunRecord | null;
 }) {
   const theme = useAppTheme();
-  const frozenChartAnchorRef = useRef<{
-    anchorSeconds: number;
-    anchorKey: string;
-  } | null>(null);
   const [selectedMetric, setSelectedMetric] = useState<TrainingMetricKey>("loss");
   const [selectedWindowSeconds, setSelectedWindowSeconds] = useState<number>(60);
   const telemetry = run?.telemetry ?? [];
@@ -80,36 +72,17 @@ export function TrainingLiveStats({
     () => getLatestTrainingTelemetry(normalizedTelemetry) ?? fallbackPoint,
     [fallbackPoint, normalizedTelemetry],
   );
-  const metricOption = METRIC_OPTIONS.find((option) => option.valueKey === selectedMetric);
-  const latestElapsedSeconds = latestPoint?.elapsedTimeSeconds ?? 0;
-  const anchorKey = `${run?.id ?? ""}:${run?.updatedAt ?? 0}:${selectedMetric}:${selectedWindowSeconds}:${theme.resolvedTheme}`;
-  const chartLatestWallClockSeconds = getChartLatestWallClockSeconds({
-    anchorRef: frozenChartAnchorRef,
-    anchorKey,
-    isTraining,
-    latestPoint,
-  });
-  const chartTimeOriginSeconds = useMemo(
-    () => chartLatestWallClockSeconds - latestElapsedSeconds,
-    [chartLatestWallClockSeconds, latestElapsedSeconds],
-  );
-  const chartData = useMemo(
-    () =>
-      chartPoints.map((point) => ({
-        time: chartTimeOriginSeconds + (point.elapsedTimeSeconds ?? 0),
-        value: point[selectedMetric],
-      })),
-    [chartPoints, chartTimeOriginSeconds, selectedMetric],
-  );
-  const chartValue = latestPoint?.[selectedMetric] ?? 0;
-  const chartKey = `${run?.id ?? "no-run"}:${normalizedTelemetry.length > 0 ? "telemetry" : "fallback"}:${selectedMetric}:${selectedWindowSeconds}:${theme.resolvedTheme}`;
+  const isPreparingTraining = run?.status === "starting";
+  const isLiveTraining = run?.status === "training";
   const progressValue = latestPoint
     ? Math.min(100, (latestPoint.step / Math.max(latestPoint.totalSteps, 1)) * 100)
     : 0;
   const isComplete = latestPoint ? latestPoint.step >= latestPoint.totalSteps : false;
-  const animating = isTraining && !isComplete;
+  const animating = isLiveTraining && !isComplete;
   const helperText =
-    isTraining && !isComplete
+    isPreparingTraining
+      ? "Preparing training runtime."
+      : isLiveTraining && !isComplete
       ? "Training in progress."
       : latestPoint
         ? "Recent training history for this dataset."
@@ -129,9 +102,11 @@ export function TrainingLiveStats({
   const displayedTokPerSecond = latestPoint ? animatedTokPerSecond : undefined;
   const displayedStepsPerSecond = latestPoint ? animatedStepsPerSecond : undefined;
   const displayedTotalTokens = latestPoint ? animatedTotalTokens : undefined;
-  const progressLabel = latestPoint
-    ? formatProgressLabel(Math.floor(animatedStep), latestPoint.totalSteps)
-    : "Waiting to start";
+  const progressLabel = isPreparingTraining
+    ? "Preparing..."
+    : latestPoint
+      ? formatProgressLabel(Math.floor(animatedStep), latestPoint.totalSteps)
+      : "Waiting to start";
   const statCards = [
     { label: "Loss", value: formatLossValue(displayedLoss) },
     { label: "Tokens/s", value: formatRateValue(displayedTokPerSecond) },
@@ -194,7 +169,7 @@ export function TrainingLiveStats({
         </div>
 
         <div>
-          {chartData.length === 0 && !isTraining ? (
+          {chartPoints.length === 0 && !isTraining ? (
             <Empty className="min-h-56 bg-muted/30">
               <EmptyHeader>
                 <EmptyTitle>No Training History Yet</EmptyTitle>
@@ -204,30 +179,98 @@ export function TrainingLiveStats({
               </EmptyHeader>
             </Empty>
           ) : (
-            <div className="h-56 bg-muted/20">
-              <Liveline
-                key={chartKey}
-                data={chartData as LivelinePoint[]}
-                value={chartValue}
-                badgeVariant="minimal"
-                color={metricOption?.accent ?? "#eb6f36"}
-                emptyText="Waiting for telemetry"
-                formatTime={(time) => formatElapsedChartTime(time - chartTimeOriginSeconds)}
-                formatValue={(value) => formatMetricValue(selectedMetric, value)}
-                loading={isTraining && chartData.length === 0}
-                padding={{ bottom: 32, left: 12, right: 88, top: 14 }}
-                paused={!isTraining || isComplete}
-                pulse={isTraining && !isComplete}
-                scrub={!isTraining || chartData.length > 1}
-                showValue
-                theme={theme.resolvedTheme}
-                valueMomentumColor={selectedMetric !== "loss"}
-                window={selectedWindowSeconds}
-              />
-            </div>
+            <TrainingTelemetryChart
+              isComplete={isComplete}
+              isLiveTraining={isLiveTraining}
+              isPreparingTraining={isPreparingTraining}
+              isTraining={isTraining}
+              points={chartPoints}
+              runId={run?.id ?? null}
+              selectedMetric={selectedMetric}
+              selectedWindowSeconds={selectedWindowSeconds}
+              theme={theme.resolvedTheme}
+            />
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function TrainingTelemetryChart({
+  isComplete,
+  isLiveTraining,
+  isPreparingTraining,
+  isTraining,
+  points,
+  runId,
+  selectedMetric,
+  selectedWindowSeconds,
+  theme,
+}: {
+  isComplete: boolean;
+  isLiveTraining: boolean;
+  isPreparingTraining: boolean;
+  isTraining: boolean;
+  points: TrainingTelemetryPoint[];
+  runId: string | null;
+  selectedMetric: TrainingMetricKey;
+  selectedWindowSeconds: number;
+  theme: "light" | "dark";
+}) {
+  const frozenChartAnchorRef = useRef<{
+    anchorSeconds: number;
+    anchorKey: string;
+  } | null>(null);
+  const metricOption = METRIC_OPTIONS.find((option) => option.valueKey === selectedMetric);
+  const latestPoint = points.at(-1) ?? null;
+  const latestElapsedSeconds = latestPoint?.elapsedTimeSeconds ?? 0;
+  const shouldFreezeTimeline = !isLiveTraining || isComplete;
+  const frozenAnchorKey = `${runId ?? "no-run"}:${latestPoint?.step ?? 0}:${latestPoint?.elapsedTimeSeconds ?? 0}:${latestPoint?.time ?? 0}`;
+  const chartLatestWallClockSeconds = getChartLatestWallClockSeconds({
+    anchorRef: frozenChartAnchorRef,
+    anchorKey: frozenAnchorKey,
+    latestPoint,
+    useLiveClock: !shouldFreezeTimeline,
+  });
+  const timelineOriginSeconds = chartLatestWallClockSeconds - latestElapsedSeconds;
+  const chartData = useMemo(
+    () =>
+      points.map((point) => ({
+        time: timelineOriginSeconds + (point.elapsedTimeSeconds ?? 0),
+        value: point[selectedMetric],
+      })),
+    [points, selectedMetric, timelineOriginSeconds],
+  );
+  const chartValue = latestPoint?.[selectedMetric] ?? 0;
+
+  return (
+    <div className="h-56 bg-muted/20">
+      <Liveline
+        key={runId ?? "no-run"}
+        data={chartData as LivelinePoint[]}
+        value={chartValue}
+        badgeVariant="minimal"
+        color={metricOption?.accent ?? "#eb6f36"}
+        emptyText={
+          isPreparingTraining
+            ? "Preparing training runtime"
+            : isTraining
+              ? "Waiting for the first telemetry sample"
+              : "Waiting for telemetry"
+        }
+        formatTime={(time) => formatElapsedChartTime(time - timelineOriginSeconds)}
+        formatValue={(value) => formatMetricValue(selectedMetric, value)}
+        loading={false}
+        padding={{ bottom: 32, left: 12, right: 88, top: 14 }}
+        paused={shouldFreezeTimeline}
+        pulse={isLiveTraining && !isComplete}
+        scrub={chartData.length > 1}
+        showValue
+        theme={theme}
+        valueMomentumColor={selectedMetric !== "loss"}
+        window={selectedWindowSeconds}
+      />
     </div>
   );
 }
@@ -290,36 +333,6 @@ function formatElapsedChartTime(seconds: number) {
   return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
-function getChartLatestWallClockSeconds({
-  anchorRef,
-  anchorKey,
-  isTraining,
-  latestPoint,
-}: {
-  anchorRef: MutableRefObject<{ anchorSeconds: number; anchorKey: string } | null>;
-  anchorKey: string;
-  isTraining: boolean;
-  latestPoint: ChartTelemetryPoint | null;
-}) {
-  if (!latestPoint) {
-    anchorRef.current = null;
-    return 0;
-  }
-
-  if (isTraining) {
-    anchorRef.current = null;
-    return latestPoint.time;
-  }
-
-  if (anchorRef.current?.anchorKey === anchorKey) {
-    return anchorRef.current.anchorSeconds;
-  }
-
-  const nextAnchorSeconds = Date.now() / 1000;
-  anchorRef.current = { anchorSeconds: nextAnchorSeconds, anchorKey };
-  return nextAnchorSeconds;
-}
-
 function formatCountValue(value?: number) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return "—";
@@ -336,4 +349,37 @@ function formatProgressLabel(step: number, totalSteps: number) {
   const safeTotalSteps = Math.max(totalSteps, 1);
   const percent = Math.min(100, Math.max(0, Math.round((safeStep / safeTotalSteps) * 100)));
   return `${safeStep.toLocaleString("en-US")} / ${safeTotalSteps.toLocaleString("en-US")} (${percent}%)`;
+}
+
+function getChartLatestWallClockSeconds({
+  anchorRef,
+  anchorKey,
+  latestPoint,
+  useLiveClock,
+}: {
+  anchorRef: MutableRefObject<{ anchorSeconds: number; anchorKey: string } | null>;
+  anchorKey: string;
+  latestPoint: ChartTelemetryPoint | null;
+  useLiveClock: boolean;
+}) {
+  if (!latestPoint) {
+    anchorRef.current = null;
+    return 0;
+  }
+
+  if (useLiveClock) {
+    anchorRef.current = null;
+    return latestPoint.time;
+  }
+
+  if (anchorRef.current?.anchorKey === anchorKey) {
+    return anchorRef.current.anchorSeconds;
+  }
+
+  const nextAnchorSeconds = Date.now() / 1000;
+  anchorRef.current = {
+    anchorKey,
+    anchorSeconds: nextAnchorSeconds,
+  };
+  return nextAnchorSeconds;
 }

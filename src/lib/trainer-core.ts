@@ -78,13 +78,14 @@ export function parseDatasetDocuments(text: string) {
 }
 
 export function prepareDataset(content: string, blockSize: number, rng: DreamPhraseRng) {
-  const summary = summarizeDatasetText(content);
+  const documents = parseDatasetDocuments(content);
 
-  if (summary.documents.length === 0) {
+  if (documents.length === 0) {
     throw new Error("The dataset needs at least one non-empty line.");
   }
 
-  const shuffled = [...summary.documents];
+  const summary = summarizeDatasetText(content);
+  const shuffled = [...documents];
   shuffleInPlace(shuffled, rng);
   const { data, tokenizer } = tokenizeDocuments(shuffled);
 
@@ -115,17 +116,31 @@ export function prepareDataset(content: string, blockSize: number, rng: DreamPhr
 }
 
 export function summarizeDatasetText(content: string): DatasetTextSummary {
-  const documents = parseDatasetDocuments(content);
-  const idToChar = [...new Set(documents.join(""))].sort();
-  const characterCount = documents.reduce((total, value) => total + value.length, 0);
-  const tokenCount = 1 + documents.reduce((total, value) => total + value.length + 1, 0);
+  const seenCharacters = new Set<string>();
+  let characterCount = 0;
+  let documentCount = 0;
+
+  for (const rawLine of content.split(/\r?\n/u)) {
+    const line = normalizeSourceText(rawLine);
+    if (!line) {
+      continue;
+    }
+
+    documentCount += 1;
+    characterCount += line.length;
+    for (const character of line) {
+      seenCharacters.add(character);
+    }
+  }
+
+  const tokenCount = 1 + characterCount + documentCount;
 
   return {
     characterCount,
-    documents,
-    lineCount: documents.length,
+    documentCount,
+    lineCount: documentCount,
     tokenCount,
-    vocabSize: idToChar.length + 1,
+    vocabSize: seenCharacters.size + 1,
   };
 }
 
