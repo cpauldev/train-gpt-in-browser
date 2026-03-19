@@ -1,6 +1,6 @@
 ![Train GPT in Browser banner](public/train-gpt-in-browser-banner.png)
 
-<video src="https://github.com/user-attachments/assets/b0db8586-4347-4118-939d-65b7492d3e7c" controls muted playsinline width="100%"></video>
+![Train GPT in Browser screenshot](public/screenshot.png)
 
 # Train GPT in Browser
 
