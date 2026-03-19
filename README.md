@@ -6,7 +6,7 @@
 
 Train a small character-level GPT directly in your browser on newline-delimited text and generate strings that follow the character patterns, structure, and common sequences learned from that dataset. Use one of the built-in datasets or upload your own `.txt` file, edit it locally, resume from browser checkpoints, and export a DreamPhraseGPT-compatible `.model` file.
 
-[Live demo](https://cpauldev.github.io/train-gpt-in-browser/)
+### [Live demo](https://cpauldev.github.io/train-gpt-in-browser/)
 
 > Note: The demo may not run reliably on some phones and tablets. The app falls back to CPU when WebGPU is unavailable, but mobile browser support, available memory, and compute performance vary widely.
 
