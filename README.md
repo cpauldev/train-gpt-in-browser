@@ -1,7 +1,5 @@
 ![Train GPT in Browser banner](public/train-gpt-in-browser-banner.png)
 
-<video src="https://github.com/user-attachments/assets/b0db8586-4347-4118-939d-65b7492d3e7c" controls muted playsinline width="100%"></video>
-
 # Train GPT in Browser
 
 Train a small character-level GPT directly in your browser on newline-delimited text and generate strings that follow the character patterns, structure, and common sequences learned from that dataset. Use one of the built-in datasets or upload your own `.txt` file, edit it locally, resume from browser checkpoints, and export a DreamPhraseGPT-compatible `.model` file.
