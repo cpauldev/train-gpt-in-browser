@@ -73,6 +73,10 @@ async function handleCommand(command: TrainerCommand) {
       }
       return;
     }
+    case "warmRuntime": {
+      await Promise.all([loadTrainerRuntime(), loadTrainerStorage()]);
+      return;
+    }
     case "resetAll": {
       const runId = activeRunId ?? "reset";
       await stopActiveTrainer();

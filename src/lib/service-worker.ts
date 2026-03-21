@@ -1,5 +1,7 @@
 import { resolveBasePath } from "@/lib/utils";
 
+let serviceWorkerReadyPromise: Promise<ServiceWorkerRegistration | null> = Promise.resolve(null);
+
 export function registerServiceWorker() {
   if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
     return;
@@ -12,20 +14,37 @@ export function registerServiceWorker() {
   const serviceWorkerUrl = resolveBasePath("service-worker.js");
   const serviceWorkerScope = resolveBasePath("");
 
-  window.addEventListener("load", () => {
-    void requestPersistentStorage();
-    void navigator.serviceWorker
-      .register(serviceWorkerUrl, {
-        scope: serviceWorkerScope,
-      })
-      .then(async () => {
-        const registration = await navigator.serviceWorker.ready;
-        registration.active?.postMessage({
-          type: "CACHE_URLS",
-          urls: collectWarmCacheUrls(),
+  serviceWorkerReadyPromise = new Promise((resolve) => {
+    const handleLoad = () => {
+      void requestPersistentStorage();
+      void navigator.serviceWorker
+        .register(serviceWorkerUrl, {
+          scope: serviceWorkerScope,
+        })
+        .then(async () => {
+          const registration = await navigator.serviceWorker.ready;
+          registration.active?.postMessage({
+            type: "CACHE_URLS",
+            urls: collectWarmCacheUrls(),
+          });
+          resolve(registration);
+        })
+        .catch(() => {
+          resolve(null);
         });
-      });
+    };
+
+    if (document.readyState === "complete") {
+      handleLoad();
+      return;
+    }
+
+    window.addEventListener("load", handleLoad, { once: true });
   });
+}
+
+export function waitForServiceWorkerReady() {
+  return serviceWorkerReadyPromise;
 }
 
 async function requestPersistentStorage() {
@@ -62,5 +81,11 @@ function collectWarmCacheUrls() {
     }
   }
 
-  return Array.from(urls);
+  return Array.from(urls).filter((url) => {
+    try {
+      return new URL(url, window.location.href).origin === window.location.origin;
+    } catch {
+      return false;
+    }
+  });
 }

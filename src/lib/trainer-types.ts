@@ -226,6 +226,9 @@ export type TrainerCommand =
       type: "deleteRun";
     }
   | {
+      type: "warmRuntime";
+    }
+  | {
       type: "resetAll";
     }
   | {

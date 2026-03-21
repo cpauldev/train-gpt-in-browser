@@ -54,6 +54,7 @@ import {
   type TrainingRunRecord,
   type WorkspaceFile,
 } from "@/lib/trainer-types";
+import { waitForServiceWorkerReady } from "@/lib/service-worker";
 import {
   appendTrainingTelemetryPoint,
   getLatestTrainingTelemetryElapsedSeconds,
@@ -91,6 +92,7 @@ export function useBrowserTrainer() {
   const selectedFileIdRef = useRef<string | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
   const importInFlightRef = useRef(false);
+  const offlineRuntimeWarmedRef = useRef(false);
   const fileSummaryCacheRef = useRef<
     Map<string, { summary: DatasetTextSummary; updatedAt: number }>
   >(new Map());
@@ -693,6 +695,22 @@ export function useBrowserTrainer() {
       terminateAllTrainingWorkers();
     };
   }, [handleWorkerEvent, hydrate, terminateAllTrainingWorkers]);
+
+  useEffect(() => {
+    if (!busyState.workerReady || offlineRuntimeWarmedRef.current) {
+      return;
+    }
+
+    offlineRuntimeWarmedRef.current = true;
+
+    void waitForServiceWorkerReady().then((registration) => {
+      if (!registration || !previewWorkerRef.current) {
+        return;
+      }
+
+      previewWorkerRef.current.postMessage({ type: "warmRuntime" });
+    });
+  }, [busyState.workerReady]);
 
   const createFile = useCallback(
     async (name: string) => {

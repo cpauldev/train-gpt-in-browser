@@ -6,7 +6,6 @@ const PRECACHE_URLS = [
   "./index.html",
   "./manifest.webmanifest",
   "./favicon.svg",
-  "./dreamphrasegpt.png",
   "./datasets/english_words.txt",
   "./datasets/us_baby_names.txt",
 ];
@@ -97,8 +96,13 @@ async function warmCache(urls) {
   const uniqueUrls = [...new Set(urls)];
 
   for (const url of uniqueUrls) {
+    const requestUrl = new URL(url, self.location.href);
+    if (requestUrl.origin !== self.location.origin) {
+      continue;
+    }
+
     try {
-      const request = new Request(url, { credentials: "same-origin" });
+      const request = new Request(requestUrl.toString(), { credentials: "same-origin" });
       const response = await fetch(request);
 
       if (shouldCacheResponse(response)) {

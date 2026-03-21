@@ -99,7 +99,7 @@ Generation is autoregressive at the character level. The worker retries outputs 
 
 ## Offline Behavior
 
-The app registers a service worker and precaches the app shell plus the bundled datasets. After the first successful load, the UI and built-in datasets can be reused offline as long as the required assets are already cached locally.
+The app registers a service worker, precaches a minimal app shell plus the bundled datasets, and then warms the cache with the assets fetched during a successful session. After the first successful load, an offline refresh should reopen the app shell instead of showing the browser's default network error, and the built-in datasets remain available from local browser storage.
 
 ## Dev
 

@@ -20,6 +20,7 @@ import { useAnimatedValue } from "@/lib/use-animated-value";
 
 type TrainingMetricKey = "loss" | "stepsPerSecond" | "tokPerSecond";
 type ChartTelemetryPoint = Pick<TrainingTelemetryPoint, "elapsedTimeSeconds" | "step" | "time">;
+type TimelineAnchorMode = "anchored-now" | "elapsed" | "point-time";
 const METRIC_OPTIONS: Array<{
   accent: string;
   label: string;
@@ -68,6 +69,14 @@ export function TrainingLiveStats({
       normalizedTelemetry.length > 0 ? normalizedTelemetry : fallbackPoint ? [fallbackPoint] : [],
     [fallbackPoint, normalizedTelemetry],
   );
+  const latestPointHasExplicitElapsed = useMemo(() => {
+    const latestTelemetryPoint = telemetry.at(-1);
+    if (hasExplicitElapsedSeconds(latestTelemetryPoint ?? null)) {
+      return true;
+    }
+
+    return telemetry.length === 0 && hasExplicitElapsedSeconds(fallbackPoint);
+  }, [fallbackPoint, telemetry]);
   const latestPoint = useMemo(
     () => getLatestTrainingTelemetry(normalizedTelemetry) ?? fallbackPoint,
     [fallbackPoint, normalizedTelemetry],
@@ -186,6 +195,7 @@ export function TrainingLiveStats({
               isTraining={isTraining}
               points={chartPoints}
               runId={run?.id ?? null}
+              latestPointHasExplicitElapsed={latestPointHasExplicitElapsed}
               selectedMetric={selectedMetric}
               selectedWindowSeconds={selectedWindowSeconds}
               theme={theme.resolvedTheme}
@@ -200,6 +210,7 @@ export function TrainingLiveStats({
 function TrainingTelemetryChart({
   isComplete,
   isLiveTraining,
+  latestPointHasExplicitElapsed,
   isPreparingTraining,
   isTraining,
   points,
@@ -210,6 +221,7 @@ function TrainingTelemetryChart({
 }: {
   isComplete: boolean;
   isLiveTraining: boolean;
+  latestPointHasExplicitElapsed: boolean;
   isPreparingTraining: boolean;
   isTraining: boolean;
   points: TrainingTelemetryPoint[];
@@ -226,12 +238,17 @@ function TrainingTelemetryChart({
   const latestPoint = points.at(-1) ?? null;
   const latestElapsedSeconds = latestPoint?.elapsedTimeSeconds ?? 0;
   const shouldFreezeTimeline = !isLiveTraining || isComplete;
+  const timelineAnchorMode = resolveTimelineAnchorMode({
+    isComplete,
+    isLiveTraining,
+    latestPointHasExplicitElapsed,
+  });
   const frozenAnchorKey = `${runId ?? "no-run"}:${latestPoint?.step ?? 0}:${latestPoint?.elapsedTimeSeconds ?? 0}:${latestPoint?.time ?? 0}`;
   const chartLatestWallClockSeconds = getChartLatestWallClockSeconds({
     anchorRef: frozenChartAnchorRef,
     anchorKey: frozenAnchorKey,
     latestPoint,
-    useLiveClock: !shouldFreezeTimeline,
+    mode: timelineAnchorMode,
   });
   const timelineOriginSeconds = chartLatestWallClockSeconds - latestElapsedSeconds;
   const chartData = useMemo(
@@ -243,9 +260,7 @@ function TrainingTelemetryChart({
     [points, selectedMetric, timelineOriginSeconds],
   );
   const chartValue = latestPoint?.[selectedMetric] ?? 0;
-  const livelineKey = shouldFreezeTimeline
-    ? `${runId ?? "no-run"}:${selectedMetric}`
-    : (runId ?? "no-run");
+  const livelineKey = `${runId ?? "no-run"}:${selectedMetric}`;
 
   return (
     <div className="h-56 bg-muted/20">
@@ -358,21 +373,26 @@ function getChartLatestWallClockSeconds({
   anchorRef,
   anchorKey,
   latestPoint,
-  useLiveClock,
+  mode,
 }: {
   anchorRef: MutableRefObject<{ anchorSeconds: number; anchorKey: string } | null>;
   anchorKey: string;
   latestPoint: ChartTelemetryPoint | null;
-  useLiveClock: boolean;
+  mode: TimelineAnchorMode;
 }) {
   if (!latestPoint) {
     anchorRef.current = null;
     return 0;
   }
 
-  if (useLiveClock) {
+  if (mode === "point-time") {
     anchorRef.current = null;
     return latestPoint.time;
+  }
+
+  if (mode === "elapsed") {
+    anchorRef.current = null;
+    return latestPoint.elapsedTimeSeconds ?? 0;
   }
 
   if (anchorRef.current?.anchorKey === anchorKey) {
@@ -385,4 +405,28 @@ function getChartLatestWallClockSeconds({
     anchorSeconds: nextAnchorSeconds,
   };
   return nextAnchorSeconds;
+}
+
+function resolveTimelineAnchorMode({
+  isComplete,
+  isLiveTraining,
+  latestPointHasExplicitElapsed,
+}: {
+  isComplete: boolean;
+  isLiveTraining: boolean;
+  latestPointHasExplicitElapsed: boolean;
+}): TimelineAnchorMode {
+  if (isLiveTraining) {
+    return "point-time";
+  }
+
+  if (isComplete && latestPointHasExplicitElapsed) {
+    return "elapsed";
+  }
+
+  return latestPointHasExplicitElapsed ? "point-time" : "anchored-now";
+}
+
+function hasExplicitElapsedSeconds(point: Pick<TrainingTelemetryPoint, "elapsedTimeSeconds"> | null) {
+  return typeof point?.elapsedTimeSeconds === "number" && Number.isFinite(point.elapsedTimeSeconds);
 }
