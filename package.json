@@ -1,7 +1,7 @@
 {
   "name": "train-gpt-in-browser",
   "productName": "Train GPT in Browser",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "main": "electron/main.cjs",
   "license": "MIT",
