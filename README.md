@@ -8,6 +8,13 @@ Train a small character-level GPT directly in your browser (with an optional Ele
 
 ## [Live demo](https://cpauldev.github.io/train-gpt-in-browser/) | [Releases](https://github.com/cpauldev/train-gpt-in-browser/releases)
 
+| Platform | File |
+|---|---|
+| Windows | [Train GPT in Browser Setup 0.1.1.exe](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.1.1/Train.GPT.in.Browser.Setup.0.1.1.exe) |
+| macOS Apple Silicon | [Train GPT in Browser-0.1.1-arm64.dmg](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.1.1/Train.GPT.in.Browser-0.1.1-arm64.dmg) |
+| macOS Intel | [Train GPT in Browser-0.1.1.dmg](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.1.1/Train.GPT.in.Browser-0.1.1.dmg) |
+| Linux | [Train GPT in Browser-0.1.1.AppImage](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.1.1/Train.GPT.in.Browser-0.1.1.AppImage) |
+
 > Note: The demo may not run reliably on some phones and tablets. The app falls back to CPU when WebGPU is unavailable, but mobile browser support, available memory, and compute performance vary widely.
 
 Example outputs trained on English words include `glossoscope`, `heartways`, `bulletine`, `joulemaker`, `braqueousness`, `chlorosiphon`, `langeling`, `margariums`, `outtravelers`, and `zamoralize`.
