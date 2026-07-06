@@ -1,19 +1,23 @@
 "use client";
 
 import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area";
-
+import type React from "react";
 import { cn } from "@/lib/utils";
 
-function ScrollArea({
+export function ScrollArea({
   className,
   children,
   scrollFade = false,
   scrollbarGutter = false,
+  fill = false,
+  clampContentMinWidth = true,
   ...props
 }: ScrollAreaPrimitive.Root.Props & {
   scrollFade?: boolean;
   scrollbarGutter?: boolean;
-}) {
+  fill?: boolean;
+  clampContentMinWidth?: boolean;
+}): React.ReactElement {
   return (
     <ScrollAreaPrimitive.Root className={cn("size-full min-h-0", className)} {...props}>
       <ScrollAreaPrimitive.Viewport
@@ -25,7 +29,13 @@ function ScrollArea({
         )}
         data-slot="scroll-area-viewport"
       >
-        {children}
+        <ScrollAreaPrimitive.Content
+          className={cn(fill && "size-full")}
+          data-slot="scroll-area-content"
+          style={clampContentMinWidth ? { minWidth: 0 } : undefined}
+        >
+          {children}
+        </ScrollAreaPrimitive.Content>
       </ScrollAreaPrimitive.Viewport>
       <ScrollBar orientation="vertical" />
       <ScrollBar orientation="horizontal" />
@@ -34,11 +44,11 @@ function ScrollArea({
   );
 }
 
-function ScrollBar({
+export function ScrollBar({
   className,
   orientation = "vertical",
   ...props
-}: ScrollAreaPrimitive.Scrollbar.Props) {
+}: ScrollAreaPrimitive.Scrollbar.Props): React.ReactElement {
   return (
     <ScrollAreaPrimitive.Scrollbar
       className={cn(
@@ -57,4 +67,4 @@ function ScrollBar({
   );
 }
 
-export { ScrollArea, ScrollBar, ScrollAreaPrimitive };
+export { ScrollAreaPrimitive };

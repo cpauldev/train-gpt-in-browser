@@ -2,14 +2,17 @@
 
 import { Accordion as AccordionPrimitive } from "@base-ui/react/accordion";
 import { ChevronDownIcon } from "lucide-react";
-
+import type React from "react";
 import { cn } from "@/lib/utils";
 
-function Accordion(props: AccordionPrimitive.Root.Props) {
+export function Accordion(props: AccordionPrimitive.Root.Props): React.ReactElement {
   return <AccordionPrimitive.Root data-slot="accordion" {...props} />;
 }
 
-function AccordionItem({ className, ...props }: AccordionPrimitive.Item.Props) {
+export function AccordionItem({
+  className,
+  ...props
+}: AccordionPrimitive.Item.Props): React.ReactElement {
   return (
     <AccordionPrimitive.Item
       className={cn("border-b last:border-b-0", className)}
@@ -19,7 +22,11 @@ function AccordionItem({ className, ...props }: AccordionPrimitive.Item.Props) {
   );
 }
 
-function AccordionTrigger({ className, children, ...props }: AccordionPrimitive.Trigger.Props) {
+export function AccordionTrigger({
+  className,
+  children,
+  ...props
+}: AccordionPrimitive.Trigger.Props): React.ReactElement {
   return (
     <AccordionPrimitive.Header className="flex">
       <AccordionPrimitive.Trigger
@@ -40,7 +47,11 @@ function AccordionTrigger({ className, children, ...props }: AccordionPrimitive.
   );
 }
 
-function AccordionPanel({ className, children, ...props }: AccordionPrimitive.Panel.Props) {
+export function AccordionPanel({
+  className,
+  children,
+  ...props
+}: AccordionPrimitive.Panel.Props): React.ReactElement {
   return (
     <AccordionPrimitive.Panel
       className="h-(--accordion-panel-height) overflow-hidden text-muted-foreground text-sm transition-[height] duration-200 ease-in-out data-ending-style:h-0 data-starting-style:h-0"
@@ -52,11 +63,4 @@ function AccordionPanel({ className, children, ...props }: AccordionPrimitive.Pa
   );
 }
 
-export {
-  Accordion,
-  AccordionItem,
-  AccordionTrigger,
-  AccordionPanel,
-  AccordionPanel as AccordionContent,
-  AccordionPrimitive,
-};
+export { AccordionPanel as AccordionContent, AccordionPrimitive };

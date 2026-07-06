@@ -8,6 +8,7 @@ import {
   replaceGeneratedResultsForTemperature,
   resolveRestoredSelection,
 } from "@/lib/browser-trainer-state";
+import { waitForServiceWorkerReady } from "@/lib/service-worker";
 import {
   clampTemperature,
   createId,
@@ -54,7 +55,6 @@ import {
   type TrainingRunRecord,
   type WorkspaceFile,
 } from "@/lib/trainer-types";
-import { waitForServiceWorkerReady } from "@/lib/service-worker";
 import {
   appendTrainingTelemetryPoint,
   getLatestTrainingTelemetryElapsedSeconds,
@@ -591,6 +591,9 @@ export function useBrowserTrainer() {
 
         case "error": {
           setBusyState((current) => ({ ...current, downloading: false, generating: false }));
+          const errorLogMessage = event.stack
+            ? `${event.name ? `${event.name}: ` : ""}${event.message}\n${event.stack}`
+            : event.message;
           toastManager.add({
             description: event.message,
             title: "Training error",
@@ -610,7 +613,7 @@ export function useBrowserTrainer() {
             {
               ...run,
               lastError: event.message,
-              logs: appendLogs(run.logs, [createLogEntry(event.message, "error")]),
+              logs: appendLogs(run.logs, [createLogEntry(errorLogMessage, "error")]),
               status: "error",
               updatedAt: Date.now(),
             },
@@ -656,18 +659,25 @@ export function useBrowserTrainer() {
       const worker = new Worker(new URL("../workers/trainer-worker.ts", import.meta.url), {
         type: "module",
       });
+      const onError = (event: ErrorEvent) => {
+        void handleWorkerEvent({
+          message: event.message || "Worker failed to start.",
+          name: event.error instanceof Error ? event.error.name : undefined,
+          runId,
+          stack: event.error instanceof Error ? event.error.stack : undefined,
+          type: "error",
+        });
+      };
       const onMessage = (event: MessageEvent<TrainerEvent>) => {
         const nextEvent = event.data;
         void handleWorkerEvent(nextEvent).finally(() => {
-          if (
-            nextEvent.type === "trainingCompleted" ||
-            nextEvent.type === "error"
-          ) {
+          if (nextEvent.type === "trainingCompleted" || nextEvent.type === "error") {
             terminateTrainingWorker(runId);
           }
         });
       };
 
+      worker.addEventListener("error", onError);
       worker.addEventListener("message", onMessage);
       trainingWorkersRef.current.set(runId, { onMessage, worker });
       return worker;
@@ -681,14 +691,25 @@ export function useBrowserTrainer() {
     });
     previewWorkerRef.current = worker;
 
+    const onError = (event: ErrorEvent) => {
+      void handleWorkerEvent({
+        message: event.message || "Worker failed to start.",
+        name: event.error instanceof Error ? event.error.name : undefined,
+        runId: null,
+        stack: event.error instanceof Error ? event.error.stack : undefined,
+        type: "error",
+      });
+    };
     const onMessage = (event: MessageEvent<TrainerEvent>) => {
       void handleWorkerEvent(event.data);
     };
 
+    worker.addEventListener("error", onError);
     worker.addEventListener("message", onMessage);
     void hydrate().catch(() => {});
 
     return () => {
+      worker.removeEventListener("error", onError);
       worker.removeEventListener("message", onMessage);
       worker.terminate();
       previewWorkerRef.current = null;
@@ -1040,7 +1061,13 @@ export function useBrowserTrainer() {
         type: "generateSamples",
       });
     },
-    [activeRun, busyState.generating, generationConfig, loadLatestRunCheckpoint, sendPreviewCommand],
+    [
+      activeRun,
+      busyState.generating,
+      generationConfig,
+      loadLatestRunCheckpoint,
+      sendPreviewCommand,
+    ],
   );
 
   const ensureRunArtifacts = useCallback(
@@ -1069,7 +1096,11 @@ export function useBrowserTrainer() {
   const downloadRunArtifact = useCallback(
     async (runId: string, kind: RunArtifactKind) => {
       const run = runsRef.current.find((item) => item.id === runId);
-      if (!run || isTrainingRunInProgress(run.status) || (!run.checkpoint && !run.checkpointSavedAt)) {
+      if (
+        !run ||
+        isTrainingRunInProgress(run.status) ||
+        (!run.checkpoint && !run.checkpointSavedAt)
+      ) {
         return;
       }
 

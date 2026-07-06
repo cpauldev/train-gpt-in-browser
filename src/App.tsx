@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { DesktopTitleBar } from "@/components/desktop-title-bar";
 import { RunPanel } from "@/components/run-panel";
 import { SidebarEditorView } from "@/components/sidebar-editor-view";
 import { SidebarListView } from "@/components/sidebar-list-view";
@@ -43,89 +44,94 @@ export default function App() {
 
   return (
     <TooltipProvider delay={200}>
-      <AlertDialog
-        open={workspaceEditor.resetDialogOpen}
-        onOpenChange={workspaceEditor.setResetDialogOpen}
-      >
-        <main className="h-dvh overflow-hidden bg-background text-foreground lg:h-screen">
-          <div className="mx-auto flex h-full w-full max-w-6xl flex-col px-3 py-3 lg:min-h-0 lg:px-6 lg:py-5">
-            {isMobile ? (
-              <Tabs
-                value={mobileTab}
-                onValueChange={(value) => setMobileTab(value as "run" | "workspace")}
-                className="min-h-0 flex-1 gap-3"
+      <div className="flex h-dvh flex-col overflow-hidden bg-background">
+        <DesktopTitleBar />
+        <AlertDialog
+          open={workspaceEditor.resetDialogOpen}
+          onOpenChange={workspaceEditor.setResetDialogOpen}
+        >
+          <main className="min-h-0 flex-1 overflow-hidden bg-background text-foreground">
+            <div className="mx-auto flex h-full w-full max-w-6xl flex-col px-3 py-3 lg:min-h-0 lg:px-6 lg:py-5">
+              {isMobile ? (
+                <Tabs
+                  value={mobileTab}
+                  onValueChange={(value) => setMobileTab(value as "run" | "workspace")}
+                  className="min-h-0 flex-1 gap-3"
+                >
+                  <div className="px-1">
+                    <TabsList variant="underline" className="w-full">
+                      <TabsTab value="run">Run</TabsTab>
+                      <TabsTab value="workspace">Workspace</TabsTab>
+                    </TabsList>
+                  </div>
+
+                  <TabsPanel value="run" className="min-h-0 flex-1">
+                    <section className="h-full min-h-0 overflow-hidden">{runPanel}</section>
+                  </TabsPanel>
+
+                  <TabsPanel value="workspace" className="min-h-0 flex-1">
+                    <section className="h-full min-h-0 overflow-hidden">{workspacePanel}</section>
+                  </TabsPanel>
+                </Tabs>
+              ) : (
+                <section className="grid min-h-0 flex-1 gap-6 lg:grid-cols-2 lg:overflow-hidden">
+                  <section className="overflow-hidden lg:h-full lg:min-h-0">{runPanel}</section>
+
+                  <section className="overflow-hidden lg:h-full lg:min-h-0">
+                    {workspacePanel}
+                  </section>
+                </section>
+              )}
+            </div>
+          </main>
+
+          <input
+            ref={workspaceEditor.fileInputRef}
+            type="file"
+            accept=".txt,text/plain"
+            multiple
+            aria-hidden="true"
+            tabIndex={-1}
+            className="pointer-events-none absolute -left-full size-px opacity-0"
+            onChange={(event) => {
+              void workspaceEditor.handleImportedFiles(event.currentTarget.files);
+              event.currentTarget.value = "";
+            }}
+          />
+
+          <AlertDialogPopup>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Reset local data?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This deletes every saved run, custom file, cached result, and local preference in
+                this browser, including your theme choice. The bundled datasets are restored
+                automatically after the reset finishes.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogClose
+                render={
+                  <Button variant="outline" disabled={trainer.busyState.resetting}>
+                    Cancel
+                  </Button>
+                }
+              />
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  void (async () => {
+                    await workspaceEditor.handleResetLocalData();
+                    theme.resetPreference();
+                  })();
+                }}
+                disabled={trainer.busyState.resetting}
               >
-                <div className="px-1">
-                  <TabsList variant="underline" className="w-full">
-                    <TabsTab value="run">Run</TabsTab>
-                    <TabsTab value="workspace">Workspace</TabsTab>
-                  </TabsList>
-                </div>
-
-                <TabsPanel value="run" className="min-h-0 flex-1">
-                  <section className="h-full min-h-0 overflow-hidden">{runPanel}</section>
-                </TabsPanel>
-
-                <TabsPanel value="workspace" className="min-h-0 flex-1">
-                  <section className="h-full min-h-0 overflow-hidden">{workspacePanel}</section>
-                </TabsPanel>
-              </Tabs>
-            ) : (
-              <section className="grid min-h-0 flex-1 gap-6 lg:grid-cols-2 lg:overflow-hidden">
-                <section className="overflow-hidden lg:h-full lg:min-h-0">{runPanel}</section>
-
-                <section className="overflow-hidden lg:h-full lg:min-h-0">{workspacePanel}</section>
-              </section>
-            )}
-          </div>
-        </main>
-
-        <input
-          ref={workspaceEditor.fileInputRef}
-          type="file"
-          accept=".txt,text/plain"
-          multiple
-          aria-hidden="true"
-          tabIndex={-1}
-          className="pointer-events-none absolute -left-full size-px opacity-0"
-          onChange={(event) => {
-            void workspaceEditor.handleImportedFiles(event.currentTarget.files);
-            event.currentTarget.value = "";
-          }}
-        />
-
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Reset local data?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This deletes every saved run, custom file, cached result, and local preference in this
-              browser, including your theme choice. The bundled datasets are restored automatically
-              after the reset finishes.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose
-              render={
-                <Button variant="outline" disabled={trainer.busyState.resetting}>
-                  Cancel
-                </Button>
-              }
-            />
-            <Button
-              variant="destructive"
-              onClick={() => {
-                void (async () => {
-                  await workspaceEditor.handleResetLocalData();
-                  theme.resetPreference();
-                })();
-              }}
-              disabled={trainer.busyState.resetting}
-            >
-              {trainer.busyState.resetting ? "Resetting..." : "Reset local data"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
+                {trainer.busyState.resetting ? "Resetting..." : "Reset local data"}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogPopup>
+        </AlertDialog>
+      </div>
     </TooltipProvider>
   );
 }

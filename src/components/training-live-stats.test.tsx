@@ -132,12 +132,12 @@ describe("TrainingLiveStats", () => {
 
     render(<TrainingLiveStats isTraining={false} run={createRun()} />);
 
-    expect(screen.getByTestId("liveline").textContent).toContain("1:1.5|2:1.25:#eb6f36:0:02:paused");
+    expect(screen.getByTestId("liveline").textContent).toContain(
+      "1:1.5|2:1.25:#eb6f36:0:02:paused",
+    );
 
     await user.click(screen.getByRole("button", { name: "Tokens/s" }));
-    expect(screen.getByTestId("liveline").textContent).toContain(
-      "1:128|2:256:#2f8f5b:0:02:paused",
-    );
+    expect(screen.getByTestId("liveline").textContent).toContain("1:128|2:256:#2f8f5b:0:02:paused");
 
     await user.click(screen.getByRole("button", { name: "Steps/s" }));
     expect(screen.getByTestId("liveline").textContent).toContain(

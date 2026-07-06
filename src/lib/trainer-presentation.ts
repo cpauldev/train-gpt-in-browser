@@ -83,12 +83,12 @@ export function formatLiveTrainingStatusLabel({
 
   const boundedStep = Math.max(0, Math.min(Math.floor(step), Math.max(totalSteps, 0)));
   const progressSummary = formatTrainingProgressSummary(boundedStep, totalSteps);
-  return step >= totalSteps
-    ? `Finalizing ${progressSummary}`
-    : `Training ${progressSummary}`;
+  return step >= totalSteps ? `Finalizing ${progressSummary}` : `Training ${progressSummary}`;
 }
 
-export function formatTrainingRunStatusLabel(status: Exclude<TrainingRunStatus, "starting" | "training">) {
+export function formatTrainingRunStatusLabel(
+  status: Exclude<TrainingRunStatus, "starting" | "training">,
+) {
   switch (status) {
     case "completed":
       return "Completed";

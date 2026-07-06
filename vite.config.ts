@@ -85,7 +85,7 @@ export default defineConfig({
       "@codemirror/commands",
       "@codemirror/state",
       "@codemirror/view",
-      "@noble/hashes/sha256",
+      "@noble/hashes/sha2.js",
       "@tensorflow/tfjs",
       "@tensorflow/tfjs-backend-cpu",
       "@tensorflow/tfjs-backend-webgpu",

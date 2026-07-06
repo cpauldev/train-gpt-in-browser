@@ -2,10 +2,14 @@
 
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
-
+import type React from "react";
 import { cn } from "@/lib/utils";
 
-function Card({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function Card({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
     className: cn(
       "relative flex flex-col rounded-2xl border bg-card not-dark:bg-clip-padding text-card-foreground shadow-xs/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
@@ -21,10 +25,14 @@ function Card({ className, render, ...props }: useRender.ComponentProps<"div">) 
   });
 }
 
-function CardFrame({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function CardFrame({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
     className: cn(
-      "[--clip-top:-1rem] [--clip-bottom:-1rem] *:data-[slot=card]:first:[--clip-top:1px] *:data-[slot=card]:last:[--clip-bottom:1px] flex flex-col relative rounded-2xl border bg-card before:bg-muted/72 not-dark:bg-clip-padding text-card-foreground shadow-xs/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)] *:data-[slot=card]:-m-px *:not-last:data-[slot=card]:rounded-b-xl *:not-last:data-[slot=card]:before:rounded-b-[calc(var(--radius-xl)-1px)] *:not-first:data-[slot=card]:rounded-t-xl *:not-first:data-[slot=card]:before:rounded-t-[calc(var(--radius-xl)-1px)] *:data-[slot=card]:[clip-path:inset(var(--clip-top)_1px_var(--clip-bottom)_1px_round_calc(var(--radius-2xl)-1px))] *:data-[slot=card]:shadow-none *:data-[slot=card]:before:hidden *:data-[slot=card]:bg-clip-padding",
+      "relative flex flex-col rounded-2xl border bg-card not-dark:bg-clip-padding text-card-foreground shadow-xs/5 [--clip-bottom:-1rem] [--clip-top:-1rem] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:bg-muted/72 before:shadow-[0_1px_--theme(--color-black/4%)] has-data-[slot=table-container]:overflow-hidden *:data-[slot=card]:-m-px *:data-[slot=table-container]:-m-px *:data-[slot=table-container]:w-[calc(100%+2px)] *:not-first:data-[slot=card]:rounded-t-xl *:not-last:data-[slot=card]:rounded-b-xl *:data-[slot=card]:bg-clip-padding *:data-[slot=card]:shadow-none *:data-[slot=card]:before:hidden *:not-first:data-[slot=card]:before:rounded-t-[calc(var(--radius-xl)-1px)] *:not-last:data-[slot=card]:before:rounded-b-[calc(var(--radius-xl)-1px)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)] *:data-[slot=card]:[clip-path:inset(var(--clip-top)_1px_var(--clip-bottom)_1px_round_calc(var(--radius-2xl)-1px))] *:data-[slot=card]:last:[--clip-bottom:1px] *:data-[slot=card]:first:[--clip-top:1px]",
       className,
     ),
     "data-slot": "card-frame",
@@ -37,10 +45,14 @@ function CardFrame({ className, render, ...props }: useRender.ComponentProps<"di
   });
 }
 
-function CardFrameHeader({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function CardFrameHeader({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
     className: cn(
-      "relative flex flex-col px-6 py-4 grid auto-rows-min grid-rows-[auto_auto] items-start gap-x-4 has-data-[slot=card-frame-action]:grid-cols-[1fr_auto]",
+      "relative flex grid auto-rows-min grid-rows-[auto_auto] flex-col items-start gap-x-4 px-6 py-4 has-data-[slot=card-frame-action]:grid-cols-[1fr_auto]",
       className,
     ),
     "data-slot": "card-frame-header",
@@ -53,9 +65,13 @@ function CardFrameHeader({ className, render, ...props }: useRender.ComponentPro
   });
 }
 
-function CardFrameTitle({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function CardFrameTitle({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
-    className: cn("font-semibold text-sm", className),
+    className: cn("self-center font-semibold text-sm", className),
     "data-slot": "card-frame-title",
   };
 
@@ -66,9 +82,13 @@ function CardFrameTitle({ className, render, ...props }: useRender.ComponentProp
   });
 }
 
-function CardFrameDescription({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function CardFrameDescription({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
-    className: cn("text-muted-foreground text-sm", className),
+    className: cn("self-center text-muted-foreground text-sm", className),
     "data-slot": "card-frame-description",
   };
 
@@ -79,10 +99,14 @@ function CardFrameDescription({ className, render, ...props }: useRender.Compone
   });
 }
 
-function CardFrameAction({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function CardFrameAction({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
     className: cn(
-      "col-start-2 row-span-2 row-start-1 self-center justify-self-end inline-flex",
+      "col-start-2 nth-3:row-span-2 nth-3:row-start-1 inline-flex self-center justify-self-end",
       className,
     ),
     "data-slot": "card-frame-action",
@@ -95,7 +119,11 @@ function CardFrameAction({ className, render, ...props }: useRender.ComponentPro
   });
 }
 
-function CardFrameFooter({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function CardFrameFooter({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
     className: cn("px-6 py-4", className),
     "data-slot": "card-frame-footer",
@@ -108,7 +136,11 @@ function CardFrameFooter({ className, render, ...props }: useRender.ComponentPro
   });
 }
 
-function CardHeader({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function CardHeader({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
     className: cn(
       "grid auto-rows-min grid-rows-[auto_auto] items-start gap-1.5 p-6 in-[[data-slot=card]:has(>[data-slot=card-panel])]:pb-4 has-data-[slot=card-action]:grid-cols-[1fr_auto]",
@@ -124,7 +156,11 @@ function CardHeader({ className, render, ...props }: useRender.ComponentProps<"d
   });
 }
 
-function CardTitle({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function CardTitle({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
     className: cn("font-semibold text-lg leading-none", className),
     "data-slot": "card-title",
@@ -137,7 +173,11 @@ function CardTitle({ className, render, ...props }: useRender.ComponentProps<"di
   });
 }
 
-function CardDescription({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function CardDescription({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
     className: cn("text-muted-foreground text-sm", className),
     "data-slot": "card-description",
@@ -150,10 +190,14 @@ function CardDescription({ className, render, ...props }: useRender.ComponentPro
   });
 }
 
-function CardAction({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function CardAction({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
     className: cn(
-      "col-start-2 row-span-2 row-start-1 self-start justify-self-end inline-flex",
+      "col-start-2 row-span-2 row-start-1 inline-flex self-start justify-self-end",
       className,
     ),
     "data-slot": "card-action",
@@ -166,7 +210,11 @@ function CardAction({ className, render, ...props }: useRender.ComponentProps<"d
   });
 }
 
-function CardPanel({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function CardPanel({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
     className: cn(
       "flex-1 p-6 in-[[data-slot=card]:has(>[data-slot=card-header]:not(.border-b))]:pt-0 in-[[data-slot=card]:has(>[data-slot=card-footer]:not(.border-t))]:pb-0",
@@ -182,7 +230,11 @@ function CardPanel({ className, render, ...props }: useRender.ComponentProps<"di
   });
 }
 
-function CardFooter({ className, render, ...props }: useRender.ComponentProps<"div">) {
+export function CardFooter({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
     className: cn(
       "flex items-center p-6 in-[[data-slot=card]:has(>[data-slot=card-panel])]:pt-4",
@@ -198,19 +250,4 @@ function CardFooter({ className, render, ...props }: useRender.ComponentProps<"d
   });
 }
 
-export {
-  Card,
-  CardFrame,
-  CardFrameHeader,
-  CardFrameTitle,
-  CardFrameDescription,
-  CardFrameAction,
-  CardFrameFooter,
-  CardAction,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardPanel,
-  CardPanel as CardContent,
-  CardTitle,
-};
+export { CardPanel as CardContent };

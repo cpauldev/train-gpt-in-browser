@@ -1,0 +1,6 @@
+[install]
+# Only resolve npm package versions that have been published for at least 7 days.
+# This reduces exposure to fresh malicious publishes during installs and updates.
+minimumReleaseAge = 604800
+# Electron 43 is explicitly approved before reaching the general age threshold.
+minimumReleaseAgeExcludes = ["electron"]

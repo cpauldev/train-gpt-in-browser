@@ -95,7 +95,7 @@ export function useTrainingPageTitle({
       id: run?.id ?? null,
       status: run?.status ?? null,
     };
-  }, [completedTrainingTitle, idlePageTitle, liveTrainingTitle, run?.id, run?.status]);
+  }, [completedTrainingTitle, idlePageTitle, liveTrainingTitle, run]);
 
   useEffect(() => {
     return () => {

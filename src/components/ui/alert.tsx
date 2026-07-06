@@ -1,6 +1,5 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
-
 import { cn } from "@/lib/utils";
 
 const alertVariants = cva(
@@ -21,11 +20,11 @@ const alertVariants = cva(
   },
 );
 
-function Alert({
+export function Alert({
   className,
   variant,
   ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
+}: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>): React.ReactElement {
   return (
     <div
       className={cn(alertVariants({ variant }), className)}
@@ -36,7 +35,10 @@ function Alert({
   );
 }
 
-function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
+export function AlertTitle({
+  className,
+  ...props
+}: React.ComponentProps<"div">): React.ReactElement {
   return (
     <div
       className={cn("font-medium [svg~&]:col-start-2", className)}
@@ -46,7 +48,10 @@ function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-function AlertDescription({ className, ...props }: React.ComponentProps<"div">) {
+export function AlertDescription({
+  className,
+  ...props
+}: React.ComponentProps<"div">): React.ReactElement {
   return (
     <div
       className={cn("flex flex-col gap-2.5 text-muted-foreground [svg~&]:col-start-2", className)}
@@ -56,7 +61,10 @@ function AlertDescription({ className, ...props }: React.ComponentProps<"div">) 
   );
 }
 
-function AlertAction({ className, ...props }: React.ComponentProps<"div">) {
+export function AlertAction({
+  className,
+  ...props
+}: React.ComponentProps<"div">): React.ReactElement {
   return (
     <div
       className={cn(
@@ -68,5 +76,3 @@ function AlertAction({ className, ...props }: React.ComponentProps<"div">) {
     />
   );
 }
-
-export { Alert, AlertTitle, AlertDescription, AlertAction };

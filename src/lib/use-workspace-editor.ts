@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
-import { preloadCodeEditorSurface } from "@/components/sidebar-editor-view";
 import { formatTemperatureKey } from "@/lib/trainer-core";
 import {
   canResumeTrainingRun,
@@ -48,14 +47,6 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
     setDraftName(selectedFileName);
     setDraftContent(selectedFileContent);
   }, [selectedFileContent, selectedFileName, workspace.selectedFileId]);
-
-  useEffect(() => {
-    if (workspace.files.length === 0) {
-      return;
-    }
-
-    void preloadCodeEditorSurface();
-  }, [workspace.files.length]);
 
   useEffect(() => {
     if (

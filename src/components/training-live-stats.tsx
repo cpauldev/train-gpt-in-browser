@@ -88,10 +88,9 @@ export function TrainingLiveStats({
     : 0;
   const isComplete = latestPoint ? latestPoint.step >= latestPoint.totalSteps : false;
   const animating = isLiveTraining && !isComplete;
-  const helperText =
-    isPreparingTraining
-      ? "Preparing training runtime."
-      : isLiveTraining && !isComplete
+  const helperText = isPreparingTraining
+    ? "Preparing training runtime."
+    : isLiveTraining && !isComplete
       ? "Training in progress."
       : latestPoint
         ? "Recent training history for this dataset."
@@ -128,7 +127,7 @@ export function TrainingLiveStats({
       <section className="space-y-3">
         <div className="space-y-1">
           <h2 className="font-semibold text-lg">Live Stats</h2>
-          <p className="text-sm text-muted-foreground">{helperText}</p>
+          <p className="text-muted-foreground text-sm">{helperText}</p>
         </div>
 
         <Progress value={progressValue}>
@@ -427,6 +426,8 @@ function resolveTimelineAnchorMode({
   return latestPointHasExplicitElapsed ? "point-time" : "anchored-now";
 }
 
-function hasExplicitElapsedSeconds(point: Pick<TrainingTelemetryPoint, "elapsedTimeSeconds"> | null) {
+function hasExplicitElapsedSeconds(
+  point: Pick<TrainingTelemetryPoint, "elapsedTimeSeconds"> | null,
+) {
   return typeof point?.elapsedTimeSeconds === "number" && Number.isFinite(point.elapsedTimeSeconds);
 }

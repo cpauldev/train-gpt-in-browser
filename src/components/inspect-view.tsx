@@ -220,7 +220,7 @@ function InspectTable({
           key={row.label}
           className="grid items-center gap-2 px-4 py-2.5 lg:grid-cols-[10rem_minmax(0,1fr)]"
         >
-          <dt className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+          <dt className="flex items-center gap-1 font-medium text-muted-foreground text-xs">
             {row.label}
             {row.tooltip && <InspectTooltip>{row.tooltip}</InspectTooltip>}
           </dt>

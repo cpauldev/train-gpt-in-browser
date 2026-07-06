@@ -240,7 +240,7 @@ export type TrainerCommand =
     };
 
 export type TrainerEvent =
-  | { message: string; runId: string | null; type: "error" }
+  | { message: string; name?: string; runId: string | null; stack?: string; type: "error" }
   | {
       generatedResults: string[];
       logEntry: LogEntry;

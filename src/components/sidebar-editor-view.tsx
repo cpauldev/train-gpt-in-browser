@@ -9,8 +9,8 @@ import {
   TextCursorInput,
   Trash2,
 } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
-
+import { useEffect, useRef, useState } from "react";
+import { CodeEditorSurface } from "@/components/code-editor-surface";
 import { InspectView } from "@/components/inspect-view";
 import { SidebarFrameHeader } from "@/components/sidebar-frame-header";
 import { StatCard } from "@/components/stat-card";
@@ -36,33 +36,15 @@ import { clampTemperature, formatNumber } from "@/lib/trainer-core";
 import { formatDurationSeconds } from "@/lib/trainer-presentation";
 import {
   createGenerationConfig,
-  isTrainingRunInProgress,
   type DatasetTextSummary,
   type GenerationConfig,
+  isTrainingRunInProgress,
   type TrainingConfig,
   type TrainingRunRecord,
   type WorkspaceFile,
 } from "@/lib/trainer-types";
 import { getLatestTrainingTelemetry } from "@/lib/training-telemetry";
 import { useAnimatedValue } from "@/lib/use-animated-value";
-
-let codeEditorSurfaceModulePromise: Promise<
-  typeof import("@/components/code-editor-surface")
-> | null = null;
-
-function loadCodeEditorSurfaceModule() {
-  codeEditorSurfaceModulePromise ??= import("@/components/code-editor-surface");
-  return codeEditorSurfaceModulePromise;
-}
-
-export function preloadCodeEditorSurface() {
-  return loadCodeEditorSurfaceModule();
-}
-
-const LazyCodeEditorSurface = lazy(async () => {
-  const module = await loadCodeEditorSurfaceModule();
-  return { default: module.CodeEditorSurface };
-});
 
 export function SidebarEditorView({
   canTrain,
@@ -120,6 +102,7 @@ export function SidebarEditorView({
   const [isLoadingRunDetails, setIsLoadingRunDetails] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [savedContent, setSavedContent] = useState(selectedFile?.content ?? "");
+  const autoOpenedTrainingRunIdRef = useRef<string | null>(null);
   const isDirty = draftContent !== savedContent;
 
   // Reset the saved baseline only when the selected file changes.
@@ -173,11 +156,21 @@ export function SidebarEditorView({
 
   useEffect(() => {
     if (!selectedRun || !isTrainingRunInProgress(selectedRun.status)) {
+      autoOpenedTrainingRunIdRef.current = null;
       return;
     }
 
+    if (
+      autoOpenedTrainingRunIdRef.current === selectedRun.id ||
+      activeTab === "source" ||
+      activeTab === "details"
+    ) {
+      return;
+    }
+
+    autoOpenedTrainingRunIdRef.current = selectedRun.id;
     setActiveTab("training");
-  }, [selectedRun?.id, selectedRun?.status]);
+  }, [activeTab, selectedRun]);
 
   useEffect(() => {
     if (activeTab === "source") {
@@ -250,7 +243,7 @@ export function SidebarEditorView({
           onValueChange={(value) => setActiveTab(value as "details" | "training" | "source")}
           className="min-h-0 flex-1 gap-0"
         >
-          <div className="border-b border-border/70 px-4 pt-3 lg:px-5 lg:pt-4">
+          <div className="border-border/70 border-b px-4 pt-3 lg:px-5 lg:pt-4">
             <TabsList variant="underline" className="min-w-max">
               <TabsTab value="training">
                 <Play className="opacity-60" />
@@ -277,7 +270,7 @@ export function SidebarEditorView({
                         <h2 className="font-semibold text-lg">
                           {selectedFile.title ?? selectedFile.name}
                         </h2>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-muted-foreground text-sm">
                           {selectedFile.description ?? "Editable local dataset"}
                         </p>
                       </div>
@@ -319,7 +312,7 @@ export function SidebarEditorView({
                   {selectedRun && !selectedRun.checkpoint && isLoadingRunDetails ? (
                     <section className="space-y-3">
                       <h2 className="font-semibold text-lg">Run</h2>
-                      <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-background px-4 py-3 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-background px-4 py-3 text-muted-foreground text-sm">
                         <Spinner className="size-4" />
                         Loading run details...
                       </div>
@@ -329,7 +322,7 @@ export function SidebarEditorView({
               </ScrollArea>
 
               {selectedRun || onDeleteFile ? (
-                <div className="border-t border-border/70 px-4 py-4 lg:px-5">
+                <div className="border-border/70 border-t px-4 py-4 lg:px-5">
                   <div className="space-y-2">
                     {selectedRun ? (
                       <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
@@ -379,7 +372,7 @@ export function SidebarEditorView({
                   <div className="space-y-4 px-4 py-4 lg:px-5 lg:py-5">
                     <div className="space-y-1">
                       <h2 className="font-semibold text-lg">Training Controls</h2>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-muted-foreground text-sm">
                         Adjust the browser training settings for this dataset.
                       </p>
                     </div>
@@ -412,7 +405,7 @@ export function SidebarEditorView({
                 )}
               </ScrollArea>
 
-              <div className="border-t border-border/70 px-4 py-4 lg:px-5">
+              <div className="border-border/70 border-t px-4 py-4 lg:px-5">
                 <div className="flex items-stretch gap-2">
                   <Button
                     onClick={() => {
@@ -457,42 +450,31 @@ export function SidebarEditorView({
               <div className="border-border/70 border-b px-4 py-4 lg:px-5 lg:py-5">
                 <div className="min-w-0 space-y-1">
                   <h2 className="font-semibold text-lg">Source Text</h2>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-muted-foreground text-sm">
                     One training sample per line. Blank lines are ignored during tokenization.
                   </p>
                 </div>
               </div>
 
               {hasVisitedSourceTab ? (
-                <Suspense
-                  fallback={
-                    <div
-                      aria-hidden
-                      className="flex flex-1 items-center justify-center bg-background"
-                    >
-                      <Spinner className="size-5 text-muted-foreground" />
-                    </div>
-                  }
-                >
-                  <LazyCodeEditorSurface
-                    ariaLabel="Source text"
-                    className="flex-1"
-                    showLineNumbers
-                    readOnly={isTraining}
-                    value={draftContent}
-                    onChange={onDraftContentChange}
-                  />
-                </Suspense>
+                <CodeEditorSurface
+                  ariaLabel="Source text"
+                  className="flex-1"
+                  showLineNumbers
+                  readOnly={isTraining}
+                  value={draftContent}
+                  onChange={onDraftContentChange}
+                />
               ) : (
                 <div className="flex-1" />
               )}
 
-              <div className="border-t border-border/70 px-4 py-4 lg:px-5">
+              <div className="border-border/70 border-t px-4 py-4 lg:px-5">
                 <div className="flex flex-col items-stretch gap-2 lg:flex-row">
                   <Button
                     variant="outline"
                     disabled={!isDirty || isTraining}
-                    className="min-w-0 w-full gap-2 lg:flex-1"
+                    className="w-full min-w-0 gap-2 lg:flex-1"
                     onClick={() => onDraftContentChange(savedContent)}
                   >
                     <RotateCcw />
@@ -500,7 +482,7 @@ export function SidebarEditorView({
                   </Button>
                   <Button
                     disabled={!isDirty || isTraining}
-                    className="min-w-0 w-full gap-2 lg:flex-1"
+                    className="w-full min-w-0 gap-2 lg:flex-1"
                     onClick={handleSaveContent}
                   >
                     <Save />

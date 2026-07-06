@@ -159,7 +159,7 @@ export function CodeEditorSurface({
     <div
       ref={containerRef}
       className={cn(
-        "h-full min-h-0 bg-background text-sm leading-6 text-foreground [&_.cm-content]:[scrollbar-gutter:stable_both-edges]",
+        "h-full min-h-0 bg-background text-foreground text-sm leading-6 [&_.cm-content]:[scrollbar-gutter:stable_both-edges]",
         className,
       )}
     />

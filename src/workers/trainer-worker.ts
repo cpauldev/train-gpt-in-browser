@@ -20,9 +20,12 @@ self.addEventListener("message", async (event: MessageEvent<TrainerCommand>) => 
     if (isAbortError(error)) {
       return;
     }
+    const message = error instanceof Error ? error.message : "Unknown worker error.";
     postMessageSafe({
-      message: error instanceof Error ? error.message : "Unknown worker error.",
+      message,
+      name: error instanceof Error ? error.name : undefined,
       runId: getRunId(event.data),
+      stack: error instanceof Error ? error.stack : undefined,
       type: "error",
     });
   }
@@ -241,22 +244,6 @@ function postTrainingEvent(sessionId: number, signal: AbortSignal, event: Traine
   postMessageSafe(event);
 }
 
-async function loadTrainerRuntime() {
-  if (!trainerRuntimePromise) {
-    trainerRuntimePromise = import("@/lib/trainer-runtime");
-  }
-
-  return trainerRuntimePromise;
-}
-
-async function loadTrainerStorage() {
-  if (!trainerStoragePromise) {
-    trainerStoragePromise = import("@/lib/trainer-storage");
-  }
-
-  return trainerStoragePromise;
-}
-
 async function createNewTrainer(
   file: Extract<TrainerCommand, { file: unknown }>["file"],
   trainingConfig: Extract<TrainerCommand, { trainingConfig: unknown }>["trainingConfig"],
@@ -279,6 +266,22 @@ async function persistTrainingCheckpoint(
 ) {
   const { saveTrainingCheckpoint } = await loadTrainerStorage();
   await saveTrainingCheckpoint(runId, checkpoint);
+}
+
+async function loadTrainerRuntime() {
+  if (!trainerRuntimePromise) {
+    trainerRuntimePromise = import("@/lib/trainer-runtime");
+  }
+
+  return trainerRuntimePromise;
+}
+
+async function loadTrainerStorage() {
+  if (!trainerStoragePromise) {
+    trainerStoragePromise = import("@/lib/trainer-storage");
+  }
+
+  return trainerStoragePromise;
 }
 
 function isAbortError(error: unknown) {

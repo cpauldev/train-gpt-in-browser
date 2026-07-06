@@ -4,7 +4,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = process.cwd();
-const serviceWorkerSource = readFileSync(path.join(repoRoot, "public", "service-worker.js"), "utf8");
+const serviceWorkerSource = readFileSync(
+  path.join(repoRoot, "public", "service-worker.js"),
+  "utf8",
+);
 
 function extractPrecacheUrls() {
   const precacheSectionMatch = serviceWorkerSource.match(/const PRECACHE_URLS = \[([\s\S]*?)\];/u);

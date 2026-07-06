@@ -1,4 +1,4 @@
-import { ArrowLeft, Cog, Monitor, Moon, Sun, Trash2 } from "lucide-react";
+import { ArrowLeft, Cog, Monitor, Moon, SunMedium, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { FrameTitle } from "@/components/ui/frame";
@@ -57,16 +57,25 @@ export function SidebarFrameHeader({
                 }
               }}
             >
-              <MenuRadioItem className="cursor-pointer" value="system">
-                <Monitor className="size-4" />
+              <MenuRadioItem
+                className="cursor-pointer"
+                value="system"
+                leadingIcon={<Monitor className="size-4 opacity-80" />}
+              >
                 System
               </MenuRadioItem>
-              <MenuRadioItem className="cursor-pointer" value="light">
-                <Sun className="size-4" />
+              <MenuRadioItem
+                className="cursor-pointer"
+                value="light"
+                leadingIcon={<SunMedium className="size-4 opacity-80" />}
+              >
                 Light
               </MenuRadioItem>
-              <MenuRadioItem className="cursor-pointer" value="dark">
-                <Moon className="size-4" />
+              <MenuRadioItem
+                className="cursor-pointer"
+                value="dark"
+                leadingIcon={<Moon className="size-4 opacity-80" />}
+              >
                 Dark
               </MenuRadioItem>
             </MenuRadioGroup>

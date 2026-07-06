@@ -1,12 +1,12 @@
-![Train GPT in Browser banner](public/train-gpt-in-browser-banner.png)
+![Train GPT in Browser banner](public/train-gpt-in-browser-banner.webp)
 
-![Train GPT in Browser screenshot](public/screenshot.png)
+![Train GPT in Browser screenshot](public/screenshot.webp)
 
 # Train GPT in Browser
 
-Train a small character-level GPT directly in your browser on newline-delimited text and generate strings that follow the character patterns, structure, and common sequences learned from that dataset. Use one of the built-in datasets or upload your own `.txt` file, edit it locally, resume from browser checkpoints, and export a DreamPhraseGPT-compatible `.model` file.
+Train a small character-level GPT directly in your browser (with an optional Electron desktop app) on newline-delimited text and generate strings that follow the character patterns, structure, and common sequences learned from that dataset. Use one of the built-in datasets or upload your own `.txt` file, edit it locally, resume from browser checkpoints, and export a DreamPhraseGPT-compatible `.model` file.
 
-### [Live demo](https://cpauldev.github.io/train-gpt-in-browser/)
+## [Live demo](https://cpauldev.github.io/train-gpt-in-browser/) | [Releases](https://github.com/cpauldev/train-gpt-in-browser/releases)
 
 > Note: The demo may not run reliably on some phones and tablets. The app falls back to CPU when WebGPU is unavailable, but mobile browser support, available memory, and compute performance vary widely.
 
@@ -33,6 +33,18 @@ npm run dev
 ```
 
 Open `http://localhost:5173`, choose a built-in dataset or upload a plain-text `.txt` file, then start training from the **Training** tab.
+
+## Desktop app
+
+This repository also includes an Electron desktop app that uses the same Vite build as the website. Run it locally with:
+
+```bash
+bun run desktop:dev
+```
+
+Create a packaged app for the current operating system with `bun run desktop:pack`, or a platform installer with `bun run desktop:dist`.
+
+Release builds are produced for Windows x64, macOS x64, macOS arm64, and Linux x64, with the corresponding `.exe`, `.dmg`, `.zip`, and `.AppImage` artifacts published on GitHub Releases.
 
 ## Storage and exports
 

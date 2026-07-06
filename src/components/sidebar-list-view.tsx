@@ -1,6 +1,4 @@
 import { FileText, Plus, Upload } from "lucide-react";
-import { useAnimatedValue } from "@/lib/use-animated-value";
-import { getLatestTrainingTelemetry } from "@/lib/training-telemetry";
 import { SidebarFrameHeader } from "@/components/sidebar-frame-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +16,8 @@ import {
   type TrainingRunRecord,
   type WorkspaceFile,
 } from "@/lib/trainer-types";
+import { getLatestTrainingTelemetry } from "@/lib/training-telemetry";
+import { useAnimatedValue } from "@/lib/use-animated-value";
 
 const SELECTION_BUTTON_CLASS =
   "h-auto w-full flex-col items-start gap-3 px-4 py-4 text-left whitespace-normal sm:h-auto";
@@ -81,11 +81,11 @@ export function SidebarListView({
           </div>
         </ScrollArea>
 
-        <div className="border-t border-border/70 px-4 py-4 lg:px-5">
+        <div className="border-border/70 border-t px-4 py-4 lg:px-5">
           <div className="flex flex-col items-stretch gap-2 lg:flex-row lg:gap-0">
             <Button
               onClick={onCreateFile}
-              className="min-w-0 w-full gap-2 lg:flex-1"
+              className="w-full min-w-0 gap-2 lg:flex-1"
               disabled={isBusy}
             >
               <Plus className="size-4" />
@@ -96,7 +96,7 @@ export function SidebarListView({
                 render={
                   <Button
                     variant="outline"
-                    className="min-w-0 w-full gap-2 lg:ml-2 lg:flex-1"
+                    className="w-full min-w-0 gap-2 lg:ml-2 lg:flex-1"
                     aria-label={isImporting ? "Importing files" : "Upload files"}
                     disabled={isBusy}
                   />
@@ -143,7 +143,7 @@ function DatasetListButton({
           {file.source === "user" ? <Badge variant="outline">Local</Badge> : null}
           <DatasetRunBadge run={run} />
         </div>
-        <p className="text-xs text-muted-foreground">{getDatasetListDescription(file)}</p>
+        <p className="text-muted-foreground text-xs">{getDatasetListDescription(file)}</p>
       </div>
     </Button>
   );
@@ -152,8 +152,7 @@ function DatasetListButton({
 function DatasetRunBadge({ run }: { run?: TrainingRunRecord }) {
   const latestPoint = getLatestTrainingTelemetry(run?.telemetry ?? []);
   const isLiveTraining =
-    run?.status === "training" &&
-    Boolean(latestPoint && latestPoint.step < latestPoint.totalSteps);
+    run?.status === "training" && Boolean(latestPoint && latestPoint.step < latestPoint.totalSteps);
   const animatedStep = useAnimatedValue(latestPoint?.step ?? 0, { enabled: isLiveTraining });
 
   if (!run) {
@@ -164,13 +163,13 @@ function DatasetRunBadge({ run }: { run?: TrainingRunRecord }) {
     run.status === "starting"
       ? "Preparing..."
       : run.status === "training"
-      ? formatLiveTrainingStatusLabel({
-          step: isLiveTraining ? animatedStep : latestPoint?.step,
-          totalSteps: latestPoint?.totalSteps,
-        })
-      : isTrainingRunInProgress(run.status)
-        ? "Preparing..."
-        : formatTrainingRunStatusLabel(run.status);
+        ? formatLiveTrainingStatusLabel({
+            step: isLiveTraining ? animatedStep : latestPoint?.step,
+            totalSteps: latestPoint?.totalSteps,
+          })
+        : isTrainingRunInProgress(run.status)
+          ? "Preparing..."
+          : formatTrainingRunStatusLabel(run.status);
 
   return (
     <Badge className="tabular-nums" variant={getTrainingRunStatusBadgeVariant(run.status)}>

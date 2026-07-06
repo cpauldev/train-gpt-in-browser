@@ -637,7 +637,7 @@ export async function resolveBackendPreference(
   requestedBackend: BackendPreference,
 ): Promise<ResolvedBackend> {
   const tryWebGpu = requestedBackend === "auto" || requestedBackend === "webgpu";
-  if (tryWebGpu) {
+  if (tryWebGpu && typeof navigator !== "undefined" && navigator.gpu) {
     try {
       await tf.setBackend("webgpu");
       await tf.ready();
@@ -924,9 +924,18 @@ async function serializeCheckpoint({
   const serialized = await Promise.all(
     model.ordered.map(async (item) => ({
       name: item.name,
-      weight: { shape: [...item.variable.shape], values: new Float32Array(await item.variable.data()) },
-      firstMoment: { shape: [...item.firstMoment.shape], values: new Float32Array(await item.firstMoment.data()) },
-      secondMoment: { shape: [...item.secondMoment.shape], values: new Float32Array(await item.secondMoment.data()) },
+      weight: {
+        shape: [...item.variable.shape],
+        values: new Float32Array(await item.variable.data()),
+      },
+      firstMoment: {
+        shape: [...item.firstMoment.shape],
+        values: new Float32Array(await item.firstMoment.data()),
+      },
+      secondMoment: {
+        shape: [...item.secondMoment.shape],
+        values: new Float32Array(await item.secondMoment.data()),
+      },
     })),
   );
   const weights = serialized.map((item) => ({ name: item.name, ...item.weight }));

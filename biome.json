@@ -16,15 +16,43 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "complexity": {
+        "noImplicitCoercions": {
+          "level": "error",
+          "options": {
+            "allowDoubleNegation": true
+          }
+        }
+      },
+      "nursery": {
+        "useSortedClasses": "error"
+      },
+      "style": {
+        "noNonNullAssertion": "error"
+      },
+      "suspicious": {
+        "noConsole": {
+          "level": "error",
+          "options": {
+            "allow": ["error", "warn"]
+          }
+        },
+        "noExplicitAny": "error"
+      }
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
     }
   },
   "overrides": [
     {
-      "includes": [
-        "src/components/ui/**",
-        "src/hooks/**"
-      ],
+      "includes": ["src/components/ui/**", "src/hooks/**"],
       "linter": {
         "enabled": false
       }

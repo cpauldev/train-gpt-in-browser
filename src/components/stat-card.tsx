@@ -11,7 +11,7 @@ export function StatCard({
 }) {
   return (
     <div className="rounded-xl border border-border/70 bg-background px-4 py-3">
-      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+      <div className="flex items-center gap-1 text-muted-foreground text-xs">
         {label}
         {labelAccessory}
       </div>
