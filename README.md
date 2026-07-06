@@ -6,6 +6,12 @@
 
 Train a small character-level GPT directly in your browser (with an optional Electron desktop app) on newline-delimited text and generate strings that follow the character patterns, structure, and common sequences learned from that dataset. Use one of the built-in datasets or upload your own `.txt` file, edit it locally, resume from browser checkpoints, and export a DreamPhraseGPT-compatible `.model` file.
 
+Example outputs trained on English words include `glossoscope`, `heartways`, `bulletine`, `joulemaker`, `braqueousness`, `chlorosiphon`, `langeling`, `margariums`, `outtravelers`, and `zamoralize`.
+
+Example outputs trained on U.S. baby names include `Miryella`, `Beliana`, `Camiliah`, `Cheraine`, `Leeandro`, `Eivyn`, `Franceline`, `Jadiza`, `Dejanell`, and `Zalinda`.
+
+*Training runs in a dedicated Web Worker with TensorFlow.js, using WebGPU when available and CPU otherwise, and everything stays local in browser storage. [`DreamPhraseGPT`](https://github.com/cpauldev/dreamphrase-gpt) is the Python/PyTorch counterpart; it adds CUDA, Apple Silicon / MPS, optional `torch.compile`, ONNX export, and a CLI artifact manager, while this app keeps the same high-level character-level model family, bundled example datasets, and `.model` export format in a browser-native runtime.*
+
 ## [Live demo](https://cpauldev.github.io/train-gpt-in-browser/) | [Releases](https://github.com/cpauldev/train-gpt-in-browser/releases)
 
 | Platform | File |
@@ -16,12 +22,6 @@ Train a small character-level GPT directly in your browser (with an optional Ele
 | Linux | [Train GPT in Browser-0.1.1.AppImage](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.1.1/Train.GPT.in.Browser-0.1.1.AppImage) |
 
 > Note: The demo may not run reliably on some phones and tablets. The app falls back to CPU when WebGPU is unavailable, but mobile browser support, available memory, and compute performance vary widely.
-
-Example outputs trained on English words include `glossoscope`, `heartways`, `bulletine`, `joulemaker`, `braqueousness`, `chlorosiphon`, `langeling`, `margariums`, `outtravelers`, and `zamoralize`.
-
-Example outputs trained on U.S. baby names include `Miryella`, `Beliana`, `Camiliah`, `Cheraine`, `Leeandro`, `Eivyn`, `Franceline`, `Jadiza`, `Dejanell`, and `Zalinda`.
-
-*Training runs in a dedicated Web Worker with TensorFlow.js, using WebGPU when available and CPU otherwise, and everything stays local in browser storage. [`DreamPhraseGPT`](https://github.com/cpauldev/dreamphrase-gpt) is the Python/PyTorch counterpart; it adds CUDA, Apple Silicon / MPS, optional `torch.compile`, ONNX export, and a CLI artifact manager, while this app keeps the same high-level character-level model family, bundled example datasets, and `.model` export format in a browser-native runtime.*
 
 ## Quick start
 
