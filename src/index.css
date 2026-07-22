@@ -2,6 +2,15 @@
 @import "tw-animate-css";
 @import "@fontsource-variable/manrope";
 
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes fade-blur-up {
   from {
     opacity: 0;
@@ -12,6 +21,24 @@
     opacity: 1;
     filter: blur(0px);
     transform: translateY(0);
+  }
+}
+
+@keyframes welcome-image-in {
+  from {
+    transform: scale(1.02);
+  }
+  to {
+    transform: scale(1.08);
+  }
+}
+
+@keyframes text-shimmer {
+  from {
+    background-position: 150% center;
+  }
+  to {
+    background-position: -50% center;
   }
 }
 
@@ -141,6 +168,7 @@ body {
   --color-code-highlight: var(--code-highlight);
   --code-foreground: var(--code-foreground);
   --color-code: var(--code);
+  --animate-spin: spin 1s linear infinite;
   @keyframes skeleton {
     to {
       background-position: -200% 0;

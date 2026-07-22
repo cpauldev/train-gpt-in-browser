@@ -4,7 +4,7 @@ export type TrainingRunStatus = "idle" | "starting" | "training" | "completed" |
 export type BackendPreference = "auto" | "webgpu" | "cpu";
 export type ResolvedBackend = "webgpu" | "cpu";
 export type LogKind = "section" | "line" | "success" | "error";
-export type RunPanelTab = "generated" | "likes";
+export type ResultsTab = "generated" | "likes";
 export type RunArtifactKind = "model";
 export type DownloadableArtifactKind = RunArtifactKind;
 export type ArtifactStorageKind = "indexeddb" | "opfs";
@@ -27,6 +27,7 @@ export type TrainingConfig = {
   compileRequested: boolean | null;
   eps: number;
   learningRate: number;
+  lossReadbackInterval?: number;
   model: ModelConfig;
   printEvery: number;
   requestedBackend: BackendPreference;
@@ -136,6 +137,7 @@ export type LogEntry = {
 export type GeneratedResultsByTemperature = Record<string, string[]>;
 
 export type TrainingTelemetryPoint = {
+  diagnostics?: TrainingTelemetryDiagnostics;
   elapsedTimeSeconds?: number;
   loss: number;
   step: number;
@@ -144,6 +146,12 @@ export type TrainingTelemetryPoint = {
   tokPerSecond: number;
   totalSteps: number;
   totalTokens: number;
+};
+
+export type TrainingTelemetryDiagnostics = {
+  batchSeconds: number;
+  lossReadback: boolean;
+  trainingStepSeconds: number;
 };
 
 export type ArtifactFileSummary = {
@@ -203,7 +211,7 @@ export type PersistedTrainingRunRecord = Omit<TrainingRunRecord, "checkpoint">;
 
 export type TrainerCommand =
   | {
-      checkpoint: SerializedCheckpoint;
+      checkpoint?: SerializedCheckpoint;
       generationConfig: GenerationConfig;
       runId: string;
       type: "generateSamples";
@@ -237,6 +245,11 @@ export type TrainerCommand =
       runId: string;
       trainingConfig: TrainingConfig;
       type: "startTraining";
+    }
+  | {
+      runId: string;
+      trainingConfig: Partial<TrainingConfig>;
+      type: "updateTrainingConfig";
     };
 
 export type TrainerEvent =
@@ -247,6 +260,14 @@ export type TrainerEvent =
       runId: string;
       temperatureKey: string;
       type: "generationCompleted";
+    }
+  | {
+      generatedResult: string;
+      isComplete: boolean;
+      runId: string;
+      sampleIndex: number;
+      temperatureKey: string;
+      type: "generationSampled";
     }
   | {
       logEntry: LogEntry;
@@ -270,9 +291,7 @@ export type TrainerEvent =
       checkpointSavedAt: number;
       datasetStats: DatasetStats;
       elapsedSeconds: number;
-      generatedResults: string[];
       runId: string;
-      temperatureKey: string;
       type: "trainingCompleted";
     }
   | {
@@ -378,16 +397,21 @@ export function getTrainingRunCompletedSteps(
 
 export function resolveTrainingRunResumeTargetSteps(
   run: Pick<TrainingRunRecord, "checkpoint" | "status" | "telemetry" | "trainingConfig">,
-  requestedSteps = run.trainingConfig.steps,
+  requestedSteps?: number,
 ) {
   const completedSteps = getTrainingRunCompletedSteps(run);
   const storedTargetSteps = run.trainingConfig.steps;
+  const nextSessionSteps = requestedSteps ?? storedTargetSteps;
 
   if (run.status === "completed" || completedSteps >= storedTargetSteps) {
-    return completedSteps + requestedSteps;
+    return completedSteps + nextSessionSteps;
   }
 
-  return Math.max(storedTargetSteps, requestedSteps, completedSteps);
+  if (requestedSteps === undefined) {
+    return Math.max(storedTargetSteps, completedSteps);
+  }
+
+  return Math.max(storedTargetSteps, completedSteps + nextSessionSteps);
 }
 
 export function canResumeTrainingRun(

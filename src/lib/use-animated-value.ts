@@ -8,6 +8,40 @@ function lerp(current: number, target: number, speed: number, dt: number): numbe
   return current + (target - current) * factor;
 }
 
+export function resolveAnimatedValueStep({
+  current,
+  dt,
+  speed,
+  target,
+}: {
+  current: number;
+  dt: number;
+  speed: number;
+  target: number;
+}) {
+  if (!Number.isFinite(target)) {
+    return {
+      done: true,
+      value: target,
+    };
+  }
+
+  if (!Number.isFinite(current)) {
+    return {
+      done: true,
+      value: target,
+    };
+  }
+
+  const next = lerp(current, target, speed, dt);
+  const done = Math.abs(next - target) < getAnimationSnapDistance(target);
+
+  return {
+    done,
+    value: done ? target : next,
+  };
+}
+
 export function getAnimationSnapDistance(target: number): number {
   return Math.min(
     Math.max(Math.abs(target) * 1e-3, MIN_ANIMATION_SNAP_DISTANCE),
@@ -50,14 +84,17 @@ export function useAnimatedValue(
       const dt = state.current.lastTime ? time - state.current.lastTime : 16.67;
       state.current.lastTime = time;
 
-      const next = lerp(state.current.current, state.current.target, speed, dt);
-      const done =
-        Math.abs(next - state.current.target) < getAnimationSnapDistance(state.current.target);
+      const nextStep = resolveAnimatedValueStep({
+        current: state.current.current,
+        dt,
+        speed,
+        target: state.current.target,
+      });
 
-      state.current.current = done ? state.current.target : next;
+      state.current.current = nextStep.value;
       setValue(state.current.current);
 
-      if (done) {
+      if (nextStep.done) {
         state.current.rafId = 0;
         state.current.lastTime = 0;
       } else {

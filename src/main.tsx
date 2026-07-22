@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { AnchoredToastProvider, ToastProvider } from "./components/ui/toast";
 import "./index.css";
-import glowBg from "@/assets/glow.jpg";
+import glowBg from "@/assets/glow.webp";
 import { initializeAppTheme, ThemeProvider } from "./lib/app-theme";
 import { registerServiceWorker } from "./lib/service-worker";
 

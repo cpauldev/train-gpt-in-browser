@@ -6,6 +6,7 @@ import {
   deleteTrainingRun,
   getActiveFileId,
   getActiveRunId,
+  getTrainingRun,
   getTrainingRunArtifact,
   listTrainingRuns,
   listWorkspaceFiles,
@@ -144,9 +145,12 @@ describe("trainer-storage", () => {
     await saveTrainingRun(run);
     await saveTrainingRunArtifacts(run, buildDreamPhraseArtifactSet(checkpoint, run.name));
 
-    const [restoredRun] = await listTrainingRuns();
+    const [listedRun] = await listTrainingRuns();
+    const restoredRun = await getTrainingRun(run.id);
     const modelArtifact = await getTrainingRunArtifact(run.id, "model");
 
+    expect(listedRun?.checkpoint).toBeUndefined();
+    expect(listedRun?.checkpointSavedAt).toBe(checkpoint.exportedAt);
     expect(restoredRun?.checkpoint?.fileName).toBe(checkpoint.fileName);
     expect(restoredRun?.checkpoint?.resumeState.completedSteps).toBe(
       checkpoint.resumeState.completedSteps,
@@ -175,8 +179,10 @@ describe("trainer-storage", () => {
     await saveTrainingRun(run, { persistCheckpoint: false });
     await saveTrainingCheckpoint(run.id, checkpoint);
 
-    const [restoredRun] = await listTrainingRuns();
+    const [listedRun] = await listTrainingRuns();
+    const restoredRun = await getTrainingRun(run.id);
 
+    expect(listedRun?.checkpoint).toBeUndefined();
     expect(restoredRun?.checkpoint?.fileName).toBe(checkpoint.fileName);
     expect(restoredRun?.checkpoint?.resumeState.completedSteps).toBe(
       checkpoint.resumeState.completedSteps,

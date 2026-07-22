@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { SidebarListView } from "@/components/sidebar-list-view";
+import { DatasetsPanel } from "@/components/datasets-panel";
 import { DEFAULT_TRAINING_CONFIG } from "@/lib/trainer-defaults";
 import type { TrainingRunRecord, WorkspaceFile } from "@/lib/trainer-types";
 
@@ -87,7 +87,7 @@ function createRun(overrides: Partial<TrainingRunRecord> = {}): TrainingRunRecor
   };
 }
 
-describe("SidebarListView", () => {
+describe("DatasetsPanel", () => {
   it("routes dataset create, upload, and open actions from the merged list", () => {
     const onCreateFile = vi.fn();
     const onImportClick = vi.fn();
@@ -96,7 +96,7 @@ describe("SidebarListView", () => {
     const run = createRun();
 
     render(
-      <SidebarListView
+      <DatasetsPanel
         files={[file]}
         isHydrating={false}
         onCreateFile={onCreateFile}
@@ -120,7 +120,7 @@ describe("SidebarListView", () => {
 
   it("title-cases non-live status badges", () => {
     render(
-      <SidebarListView
+      <DatasetsPanel
         files={[createFile()]}
         isHydrating={false}
         onCreateFile={vi.fn()}
@@ -136,7 +136,7 @@ describe("SidebarListView", () => {
 
   it("shows the empty dataset state when there are no files", () => {
     render(
-      <SidebarListView
+      <DatasetsPanel
         files={[]}
         isHydrating={false}
         onCreateFile={vi.fn()}
@@ -155,7 +155,7 @@ describe("SidebarListView", () => {
 
   it("shows a centered loading state while hydration is in progress", () => {
     render(
-      <SidebarListView
+      <DatasetsPanel
         files={[]}
         isHydrating
         onCreateFile={vi.fn()}
@@ -172,7 +172,7 @@ describe("SidebarListView", () => {
 
   it("shows live training progress in the dataset badge while a run is active", () => {
     render(
-      <SidebarListView
+      <DatasetsPanel
         files={[createFile()]}
         isHydrating={false}
         onCreateFile={vi.fn()}
@@ -204,7 +204,7 @@ describe("SidebarListView", () => {
 
   it("shows a preparing badge before training telemetry starts", () => {
     render(
-      <SidebarListView
+      <DatasetsPanel
         files={[createFile()]}
         isHydrating={false}
         onCreateFile={vi.fn()}

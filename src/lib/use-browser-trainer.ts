@@ -16,7 +16,11 @@ import {
   getRunName,
   summarizeDatasetText,
 } from "@/lib/trainer-core";
-import { DEFAULT_GENERATION_CONFIG, DEFAULT_TRAINING_CONFIG } from "@/lib/trainer-defaults";
+import {
+  DEFAULT_GENERATION_CONFIG,
+  DEFAULT_TRAINING_CONFIG,
+  TRAINING_CONFIG_STORAGE_KEY,
+} from "@/lib/trainer-defaults";
 import { downloadModelFile } from "@/lib/trainer-export";
 import { formatDurationSeconds } from "@/lib/trainer-presentation";
 import {
@@ -46,8 +50,8 @@ import {
   type GenerationConfig,
   hasTrainingRun,
   isTrainingRunInProgress,
+  type ResultsTab,
   type RunArtifactKind,
-  type RunPanelTab,
   resolveTrainingRunResumeTargetSteps,
   type TrainerCommand,
   type TrainerEvent,
@@ -74,6 +78,18 @@ type BrowserTrainerBusyState = {
   workerReady: boolean;
 };
 
+type CommitOptions = {
+  transition?: boolean;
+};
+
+type GenerationProgress = {
+  completedSamples: number;
+  startedAt: number;
+  tokensGenerated: number;
+  tokensPerSecond: number;
+  totalSamples: number;
+};
+
 const INITIAL_BUSY_STATE: BrowserTrainerBusyState = {
   downloading: false,
   generating: false,
@@ -82,6 +98,81 @@ const INITIAL_BUSY_STATE: BrowserTrainerBusyState = {
   resetting: false,
   workerReady: false,
 };
+
+function mergeTrainingConfig(config: Partial<TrainingConfig> | null | undefined): TrainingConfig {
+  return {
+    ...DEFAULT_TRAINING_CONFIG,
+    ...config,
+    model: {
+      ...DEFAULT_TRAINING_CONFIG.model,
+      ...config?.model,
+    },
+  };
+}
+
+function loadStoredTrainingConfig() {
+  if (typeof window === "undefined") {
+    return DEFAULT_TRAINING_CONFIG;
+  }
+
+  try {
+    const serializedConfig = window.localStorage.getItem(TRAINING_CONFIG_STORAGE_KEY);
+    if (!serializedConfig) {
+      return DEFAULT_TRAINING_CONFIG;
+    }
+
+    return mergeTrainingConfig(JSON.parse(serializedConfig) as Partial<TrainingConfig>);
+  } catch {
+    return DEFAULT_TRAINING_CONFIG;
+  }
+}
+
+function saveStoredTrainingConfig(config: TrainingConfig) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(TRAINING_CONFIG_STORAGE_KEY, JSON.stringify(config));
+  } catch {
+    // Non-critical; the current session still uses the updated controls.
+  }
+}
+
+function clearStoredTrainingConfig() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(TRAINING_CONFIG_STORAGE_KEY);
+  } catch {
+    // Non-critical; reset still applies for the current session.
+  }
+}
+
+function getGenerationSampleKey(runId: string, temperatureKey: string, sampleIndex: number) {
+  return `${runId}:${temperatureKey}:${sampleIndex}`;
+}
+
+function removePendingGenerationSamples(
+  current: Set<string>,
+  runId: string,
+  temperatureKey?: string,
+) {
+  const prefix = temperatureKey ? `${runId}:${temperatureKey}:` : `${runId}:`;
+  return new Set([...current].filter((key) => !key.startsWith(prefix)));
+}
+
+function createGenerationProgress(totalSamples: number): GenerationProgress {
+  return {
+    completedSamples: 0,
+    startedAt: performance.now(),
+    tokensGenerated: 0,
+    tokensPerSecond: 0,
+    totalSamples,
+  };
+}
 
 export function useBrowserTrainer() {
   const previewWorkerRef = useRef<Worker | null>(null);
@@ -97,15 +188,21 @@ export function useBrowserTrainer() {
     Map<string, { summary: DatasetTextSummary; updatedAt: number }>
   >(new Map());
   const telemetryPersistedAtRef = useRef<Map<string, number>>(new Map());
+  const generationSampleLengthsRef = useRef<Map<string, number>>(new Map());
 
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [runs, setRuns] = useState<TrainingRunRecord[]>([]);
   const [selectedFileId, setSelectedFileIdState] = useState<string | null>(null);
   const [activeRunId, setActiveRunIdState] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<RunPanelTab>("generated");
-  const [trainingConfig, setTrainingConfig] = useState<TrainingConfig>(DEFAULT_TRAINING_CONFIG);
+  const [activeTab, setActiveTab] = useState<ResultsTab>("generated");
+  const [trainingConfig, setTrainingConfigState] =
+    useState<TrainingConfig>(loadStoredTrainingConfig);
   const [generationConfig, setGenerationConfig] =
     useState<GenerationConfig>(DEFAULT_GENERATION_CONFIG);
+  const [pendingGenerationSamples, setPendingGenerationSamples] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(null);
   const [busyState, setBusyState] = useState<BrowserTrainerBusyState>(INITIAL_BUSY_STATE);
 
   useEffect(() => {
@@ -120,17 +217,73 @@ export function useBrowserTrainer() {
     activeRunIdRef.current = activeRunId;
   }, [activeRunId]);
 
-  const commitFiles = useCallback((nextFiles: WorkspaceFile[]) => {
-    startTransition(() => {
-      setFiles(nextFiles);
+  useEffect(() => {
+    const runId = activeRunIdRef.current;
+    if (!runId) {
+      return;
+    }
+
+    const run = runsRef.current.find((r) => r.id === runId);
+    if (!run || !isTrainingRunInProgress(run.status)) {
+      return;
+    }
+
+    const workerEntry = trainingWorkersRef.current.get(runId);
+    if (!workerEntry) {
+      return;
+    }
+
+    workerEntry.worker.postMessage({
+      runId,
+      trainingConfig: {
+        lossReadbackInterval: trainingConfig.lossReadbackInterval,
+      },
+      type: "updateTrainingConfig",
     });
+  }, [trainingConfig.lossReadbackInterval]);
+
+  const commitFiles = useCallback((nextFiles: WorkspaceFile[], options?: CommitOptions) => {
+    const commit = () => {
+      setFiles(nextFiles);
+    };
+
+    if (options?.transition === false) {
+      commit();
+      return;
+    }
+
+    startTransition(commit);
   }, []);
 
-  const commitRuns = useCallback((nextRuns: TrainingRunRecord[]) => {
+  const commitRuns = useCallback((nextRuns: TrainingRunRecord[], options?: CommitOptions) => {
     runsRef.current = nextRuns;
-    startTransition(() => {
+
+    const commit = () => {
       setRuns(nextRuns);
-    });
+    };
+
+    if (options?.transition === false) {
+      commit();
+      return;
+    }
+
+    startTransition(commit);
+  }, []);
+
+  const setTrainingConfig = useCallback(
+    (config: TrainingConfig | ((current: TrainingConfig) => TrainingConfig)) => {
+      setTrainingConfigState((current) => {
+        const nextConfig = typeof config === "function" ? config(current) : config;
+        saveStoredTrainingConfig(nextConfig);
+        return nextConfig;
+      });
+    },
+    [],
+  );
+
+  const resetTrainingConfig = useCallback(() => {
+    clearStoredTrainingConfig();
+    setTrainingConfigState(DEFAULT_TRAINING_CONFIG);
   }, []);
 
   const persistSelectedFileId = useCallback((nextFileId: string | null) => {
@@ -191,6 +344,12 @@ export function useBrowserTrainer() {
     previewWorkerRef.current?.postMessage(command);
   }, []);
 
+  const sendGenerationCommand = useCallback((runId: string, command: TrainerCommand) => {
+    (trainingWorkersRef.current.get(runId)?.worker ?? previewWorkerRef.current)?.postMessage(
+      command,
+    );
+  }, []);
+
   const getRunForFile = useCallback(
     (fileId: string | null, availableRuns = runsRef.current) =>
       fileId ? (availableRuns.find((run) => run.fileId === fileId) ?? null) : null,
@@ -227,7 +386,6 @@ export function useBrowserTrainer() {
       }
 
       persistSelectedFileId(run.fileId);
-      setTrainingConfig(run.trainingConfig);
       loadRunIntoWorker(run);
       return run;
     },
@@ -291,10 +449,9 @@ export function useBrowserTrainer() {
           runs: nextRuns,
         });
 
-        commitFiles(nextFiles);
-        commitRuns(nextRuns);
+        commitFiles(nextFiles, { transition: false });
+        commitRuns(nextRuns, { transition: false });
         setGenerationConfig(DEFAULT_GENERATION_CONFIG);
-        setTrainingConfig(DEFAULT_TRAINING_CONFIG);
 
         persistSelectedFileId(restoredSelection.selectedFileId);
         persistActiveRunId(restoredSelection.activeRunId);
@@ -302,7 +459,6 @@ export function useBrowserTrainer() {
         const restoredRun =
           nextRuns.find((run) => run.id === restoredSelection.activeRunId) ?? null;
         if (restoredRun) {
-          setTrainingConfig(restoredRun.trainingConfig);
           loadRunIntoWorker(restoredRun);
         }
 
@@ -392,16 +548,42 @@ export function useBrowserTrainer() {
     [replaceRun],
   );
 
-  const ensureRunCheckpointLoaded = useCallback(
-    async (runId: string) => {
-      const run = runsRef.current.find((item) => item.id === runId) ?? null;
-      if (!run) {
-        return null;
-      }
+  const beginGenerationForRun = useCallback(
+    async (run: TrainingRunRecord, temperature: number) => {
+      const config = createGenerationConfig({
+        numSamples: generationConfig.numSamples,
+        requestedBlockSize:
+          run.checkpoint?.tokenizer.blockSize ?? run.trainingConfig.model.blockSize,
+        temperature: clampTemperature(temperature),
+      });
+      const temperatureKey = config.temperature.toFixed(1);
 
-      return loadLatestRunCheckpoint(run);
+      setBusyState((current) => ({ ...current, generating: true }));
+      generationSampleLengthsRef.current.clear();
+      setGenerationProgress(createGenerationProgress(config.numSamples));
+      setPendingGenerationSamples((current) =>
+        removePendingGenerationSamples(current, run.id, temperatureKey),
+      );
+      await replaceRun(
+        {
+          ...run,
+          generatedResults: replaceGeneratedResultsForTemperature(
+            run.generatedResults,
+            temperatureKey,
+            [],
+          ),
+          updatedAt: Date.now(),
+        },
+        { persist: false },
+      );
+      setActiveTab("generated");
+      sendGenerationCommand(run.id, {
+        generationConfig: config,
+        runId: run.id,
+        type: "generateSamples",
+      });
     },
-    [loadLatestRunCheckpoint],
+    [generationConfig.numSamples, replaceRun, sendGenerationCommand],
   );
 
   const handleWorkerEvent = useCallback(
@@ -539,11 +721,6 @@ export function useBrowserTrainer() {
             checkpoint: undefined,
             checkpointSavedAt: event.checkpointSavedAt,
             datasetStats: event.datasetStats,
-            generatedResults: replaceGeneratedResultsForTemperature(
-              run.generatedResults,
-              event.temperatureKey,
-              event.generatedResults,
-            ),
             status: "completed",
             updatedAt: event.checkpointSavedAt,
           };
@@ -561,11 +738,17 @@ export function useBrowserTrainer() {
             title: "Training complete",
             type: "success",
           });
+          await beginGenerationForRun(nextRun, generationConfig.temperature);
           return;
         }
 
         case "generationCompleted": {
           setBusyState((current) => ({ ...current, generating: false }));
+          generationSampleLengthsRef.current.clear();
+          setGenerationProgress(null);
+          setPendingGenerationSamples((current) =>
+            removePendingGenerationSamples(current, event.runId, event.temperatureKey),
+          );
 
           const run = runsRef.current.find((item) => item.id === event.runId);
           if (!run) {
@@ -589,8 +772,76 @@ export function useBrowserTrainer() {
           return;
         }
 
+        case "generationSampled": {
+          const run = runsRef.current.find((item) => item.id === event.runId);
+          if (!run) {
+            return;
+          }
+
+          const currentResults = run.generatedResults[event.temperatureKey] ?? [];
+          const nextResults = [...currentResults];
+          nextResults[event.sampleIndex] = event.generatedResult;
+          const sampleKey = getGenerationSampleKey(
+            event.runId,
+            event.temperatureKey,
+            event.sampleIndex,
+          );
+          const previousLength = generationSampleLengthsRef.current.get(sampleKey) ?? 0;
+          const nextLength = event.generatedResult.length;
+          const tokenDelta = Math.max(nextLength - previousLength, 0);
+          generationSampleLengthsRef.current.set(sampleKey, nextLength);
+
+          setPendingGenerationSamples((current) => {
+            const next = new Set(current);
+            if (event.isComplete) {
+              next.delete(sampleKey);
+            } else {
+              next.add(sampleKey);
+            }
+            return next;
+          });
+          setGenerationProgress((current) => {
+            const progress = current ?? createGenerationProgress(generationConfig.numSamples);
+            const tokensGenerated = progress.tokensGenerated + tokenDelta;
+            const elapsedSeconds = Math.max((performance.now() - progress.startedAt) / 1000, 1e-9);
+
+            return {
+              ...progress,
+              completedSamples: Math.max(
+                progress.completedSamples,
+                event.isComplete ? event.sampleIndex + 1 : event.sampleIndex,
+              ),
+              tokensGenerated,
+              tokensPerSecond: tokensGenerated / elapsedSeconds,
+            };
+          });
+
+          await replaceRun(
+            {
+              ...run,
+              generatedResults: replaceGeneratedResultsForTemperature(
+                run.generatedResults,
+                event.temperatureKey,
+                nextResults,
+              ),
+              updatedAt: Date.now(),
+            },
+            { persist: false },
+          );
+          setActiveTab("generated");
+          return;
+        }
+
         case "error": {
           setBusyState((current) => ({ ...current, downloading: false, generating: false }));
+          generationSampleLengthsRef.current.clear();
+          setGenerationProgress(null);
+          const runId = event.runId;
+          if (runId) {
+            setPendingGenerationSamples((current) =>
+              removePendingGenerationSamples(current, runId),
+            );
+          }
           const errorLogMessage = event.stack
             ? `${event.name ? `${event.name}: ` : ""}${event.message}\n${event.stack}`
             : event.message;
@@ -632,7 +883,7 @@ export function useBrowserTrainer() {
         }
       }
     },
-    [replaceRun],
+    [beginGenerationForRun, generationConfig.numSamples, generationConfig.temperature, replaceRun],
   );
 
   const terminateTrainingWorker = useCallback((runId: string) => {
@@ -671,7 +922,7 @@ export function useBrowserTrainer() {
       const onMessage = (event: MessageEvent<TrainerEvent>) => {
         const nextEvent = event.data;
         void handleWorkerEvent(nextEvent).finally(() => {
-          if (nextEvent.type === "trainingCompleted" || nextEvent.type === "error") {
+          if (nextEvent.type === "error") {
             terminateTrainingWorker(runId);
           }
         });
@@ -995,6 +1246,8 @@ export function useBrowserTrainer() {
         checkpoint: undefined,
         checkpointSavedAt:
           checkpointedRun.checkpointSavedAt ?? checkpointedRun.checkpoint.exportedAt,
+        generatedResults: {},
+        likes: [],
         status: "starting",
         trainingConfig: nextTrainingConfig,
         updatedAt: Date.now(),
@@ -1030,44 +1283,34 @@ export function useBrowserTrainer() {
     ],
   );
 
-  const generateForActiveRun = useCallback(
-    async (temperature: number) => {
+  const generateForRun = useCallback(
+    async (run: TrainingRunRecord | null, temperature: number) => {
       if (
-        !activeRun ||
-        isTrainingRunInProgress(activeRun.status) ||
+        !run ||
+        isTrainingRunInProgress(run.status) ||
         busyState.generating ||
-        (!activeRun.checkpoint && !activeRun.checkpointSavedAt)
+        (!run.checkpoint && !run.checkpointSavedAt)
       ) {
         return;
       }
 
-      setBusyState((current) => ({ ...current, generating: true }));
-      const checkpointedRun = await loadLatestRunCheckpoint(activeRun);
-      if (!checkpointedRun?.checkpoint) {
-        setBusyState((current) => ({ ...current, generating: false }));
-        return;
-      }
-
-      const config = createGenerationConfig({
-        numSamples: generationConfig.numSamples,
-        requestedBlockSize: checkpointedRun.checkpoint.tokenizer.blockSize,
-        temperature: clampTemperature(temperature),
-      });
-
-      sendPreviewCommand({
-        checkpoint: checkpointedRun.checkpoint,
-        generationConfig: config,
-        runId: checkpointedRun.id,
-        type: "generateSamples",
-      });
+      await beginGenerationForRun(run, temperature);
     },
-    [
-      activeRun,
-      busyState.generating,
-      generationConfig,
-      loadLatestRunCheckpoint,
-      sendPreviewCommand,
-    ],
+    [beginGenerationForRun, busyState.generating],
+  );
+
+  const generateForActiveRun = useCallback(
+    async (temperature: number) => {
+      await generateForRun(activeRun, temperature);
+    },
+    [activeRun, generateForRun],
+  );
+
+  const generateForRunId = useCallback(
+    async (runId: string, temperature: number) => {
+      await generateForRun(runsRef.current.find((run) => run.id === runId) ?? null, temperature);
+    },
+    [generateForRun],
   );
 
   const ensureRunArtifacts = useCallback(
@@ -1170,9 +1413,9 @@ export function useBrowserTrainer() {
     ],
   );
 
-  const toggleLike = useCallback(
-    async (value: string) => {
-      if (!activeRun) {
+  const toggleLikeForRun = useCallback(
+    async (run: TrainingRunRecord | null, value: string) => {
+      if (!run) {
         return;
       }
 
@@ -1181,20 +1424,34 @@ export function useBrowserTrainer() {
         return;
       }
 
-      const likes = activeRun.likes.includes(normalizedValue)
-        ? activeRun.likes.filter((item) => item !== normalizedValue)
-        : [normalizedValue, ...activeRun.likes];
+      const likes = run.likes.includes(normalizedValue)
+        ? run.likes.filter((item) => item !== normalizedValue)
+        : [normalizedValue, ...run.likes];
 
       await replaceRun(
         {
-          ...activeRun,
+          ...run,
           likes,
           updatedAt: Date.now(),
         },
         { persistCheckpoint: false },
       );
     },
-    [activeRun, replaceRun],
+    [replaceRun],
+  );
+
+  const toggleLike = useCallback(
+    async (value: string) => {
+      await toggleLikeForRun(activeRun, value);
+    },
+    [activeRun, toggleLikeForRun],
+  );
+
+  const toggleLikeForRunId = useCallback(
+    async (runId: string, value: string) => {
+      await toggleLikeForRun(runsRef.current.find((run) => run.id === runId) ?? null, value);
+    },
+    [toggleLikeForRun],
   );
 
   const resetAll = useCallback(async () => {
@@ -1204,8 +1461,11 @@ export function useBrowserTrainer() {
       sendPreviewCommand({ type: "resetAll" });
       await resetTrainerStorage();
       await hydrate({ suppressErrorToast: true });
-      setTrainingConfig(DEFAULT_TRAINING_CONFIG);
+      resetTrainingConfig();
       setGenerationConfig(DEFAULT_GENERATION_CONFIG);
+      setPendingGenerationSamples(new Set());
+      generationSampleLengthsRef.current.clear();
+      setGenerationProgress(null);
     } catch (error) {
       toastManager.add({
         description: error instanceof Error ? error.message : "The browser data couldn't be reset.",
@@ -1215,7 +1475,7 @@ export function useBrowserTrainer() {
     } finally {
       setBusyState((current) => ({ ...current, resetting: false }));
     }
-  }, [hydrate, sendPreviewCommand, terminateAllTrainingWorkers]);
+  }, [hydrate, resetTrainingConfig, sendPreviewCommand, terminateAllTrainingWorkers]);
 
   const hasActiveTraining = useMemo(() => hasTrainingRun(runs), [runs]);
 
@@ -1225,9 +1485,13 @@ export function useBrowserTrainer() {
       activeTab,
       config: generationConfig,
       generateForActiveRun,
+      generateForRun: generateForRunId,
+      pendingSamples: pendingGenerationSamples,
+      progress: generationProgress,
       setActiveTab,
       setConfig: setGenerationConfig,
       toggleLike,
+      toggleLikeForRun: toggleLikeForRunId,
     },
     maintenance: {
       resetAll,
@@ -1236,7 +1500,6 @@ export function useBrowserTrainer() {
       active: activeRun,
       all: runs,
       downloadArtifact: downloadRunArtifact,
-      ensureCheckpoint: ensureRunCheckpointLoaded,
       getByFileId: getRunForFile,
       remove: removeRun,
       resume: resumeRun,

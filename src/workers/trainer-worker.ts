@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
 import { createLogEntry } from "@/lib/trainer-core";
-import type { GenerationConfig, TrainerCommand, TrainerEvent } from "@/lib/trainer-types";
+import type { TrainerCommand, TrainerEvent, TrainingConfig } from "@/lib/trainer-types";
 
 type BrowserTrainer = import("@/lib/trainer-runtime").BrowserTrainer;
 
@@ -39,14 +39,14 @@ async function handleCommand(command: TrainerCommand) {
       await stopActiveTrainer();
       activeRunId = command.runId;
       activeTrainer = await createNewTrainer(command.file, command.trainingConfig);
-      await startTraining(activeTrainer, command.runId, command.generationConfig);
+      await startTraining(activeTrainer, command.runId);
       return;
     }
     case "resumeTraining": {
       await stopActiveTrainer();
       activeRunId = command.runId;
       activeTrainer = await createTrainerFromCheckpoint(command.checkpoint, command.trainingConfig);
-      await startTraining(activeTrainer, command.runId, command.generationConfig);
+      await startTraining(activeTrainer, command.runId);
       return;
     }
     case "loadRun": {
@@ -57,7 +57,31 @@ async function handleCommand(command: TrainerCommand) {
     }
     case "generateSamples": {
       const trainer = await ensureActiveTrainer(command.runId, command.checkpoint);
-      const generatedResults = await trainer.generateSamples(command.generationConfig);
+      const temperatureKey = command.generationConfig.temperature.toFixed(1);
+      const generatedResults = await trainer.generateSamples(
+        command.generationConfig,
+        undefined,
+        (generatedResult, sampleIndex) => {
+          postMessageSafe({
+            generatedResult,
+            isComplete: true,
+            runId: command.runId,
+            sampleIndex,
+            temperatureKey,
+            type: "generationSampled",
+          });
+        },
+        (generatedResult, sampleIndex) => {
+          postMessageSafe({
+            generatedResult,
+            isComplete: false,
+            runId: command.runId,
+            sampleIndex,
+            temperatureKey,
+            type: "generationSampled",
+          });
+        },
+      );
       postMessageSafe({
         generatedResults,
         logEntry: createLogEntry(
@@ -65,7 +89,7 @@ async function handleCommand(command: TrainerCommand) {
           "success",
         ),
         runId: command.runId,
-        temperatureKey: command.generationConfig.temperature.toFixed(1),
+        temperatureKey,
         type: "generationCompleted",
       });
       return;
@@ -89,6 +113,12 @@ async function handleCommand(command: TrainerCommand) {
       });
       return;
     }
+    case "updateTrainingConfig": {
+      if (activeTrainer && activeRunId === command.runId) {
+        activeTrainer.updateTrainingConfig(command.trainingConfig);
+      }
+      return;
+    }
     default: {
       const exhaustive = command;
       throw new Error(`Unsupported worker command: ${String(exhaustive)}`);
@@ -96,11 +126,7 @@ async function handleCommand(command: TrainerCommand) {
   }
 }
 
-async function startTraining(
-  trainer: BrowserTrainer,
-  runId: string,
-  generationConfig: GenerationConfig,
-) {
+async function startTraining(trainer: BrowserTrainer, runId: string) {
   const sessionId = ++activeTrainingSessionId;
   const abortController = new AbortController();
   activeTrainingAbortController = abortController;
@@ -114,35 +140,12 @@ async function startTraining(
 
   const trainingPromise = trainer
     .train({
-      generationConfig,
       onProgress: async (summary, isAutosave) => {
-        if (summary.generatedResults) {
-          if (!summary.checkpoint) {
-            throw new Error("Training completed without a checkpoint payload.");
-          }
-
-          await persistTrainingCheckpoint(runId, summary.checkpoint);
-          postTrainingEvent(sessionId, abortController.signal, {
-            checkpointSavedAt: summary.checkpoint.exportedAt,
-            datasetStats: summary.checkpoint.datasetStats,
-            elapsedSeconds: summary.elapsedSeconds,
-            generatedResults: summary.generatedResults,
-            runId,
-            temperatureKey: generationConfig.temperature.toFixed(1),
-            type: "trainingCompleted",
-          });
-          postTrainingEvent(sessionId, abortController.signal, {
-            logEntry: summary.logEntry,
-            runId,
-            type: "log",
-          });
-          return;
-        }
-
+        const isComplete = summary.checkpoint && summary.completedSteps >= summary.totalSteps;
         postTrainingEvent(sessionId, abortController.signal, {
           logEntry: summary.logEntry,
           runId,
-          type: "trainingProgress",
+          type: isComplete ? "log" : "trainingProgress",
         });
 
         if (isAutosave) {
@@ -151,12 +154,22 @@ async function startTraining(
           }
 
           await persistTrainingCheckpoint(runId, summary.checkpoint);
-          postTrainingEvent(sessionId, abortController.signal, {
-            checkpointSavedAt: summary.checkpoint.exportedAt,
-            datasetStats: summary.checkpoint.datasetStats,
-            runId,
-            type: "trainingCheckpoint",
-          });
+          if (isComplete) {
+            postTrainingEvent(sessionId, abortController.signal, {
+              checkpointSavedAt: summary.checkpoint.exportedAt,
+              datasetStats: summary.checkpoint.datasetStats,
+              elapsedSeconds: summary.elapsedSeconds,
+              runId,
+              type: "trainingCompleted",
+            });
+          } else {
+            postTrainingEvent(sessionId, abortController.signal, {
+              checkpointSavedAt: summary.checkpoint.exportedAt,
+              datasetStats: summary.checkpoint.datasetStats,
+              runId,
+              type: "trainingCheckpoint",
+            });
+          }
         }
       },
       onStart: async (logEntries) => {
@@ -199,16 +212,26 @@ async function startTraining(
 
 async function ensureActiveTrainer(
   runId: string,
-  checkpoint: Extract<TrainerCommand, { checkpoint: unknown }>["checkpoint"],
+  checkpoint: Extract<TrainerCommand, { type: "generateSamples" }>["checkpoint"],
 ) {
   if (activeTrainer && activeRunId === runId) {
     return activeTrainer;
   }
 
+  const nextCheckpoint = checkpoint ?? (await loadCheckpointForRun(runId));
+  if (!nextCheckpoint) {
+    throw new Error("Cannot generate samples before the model is loaded.");
+  }
+
   await stopActiveTrainer();
   activeRunId = runId;
-  activeTrainer = await createTrainerFromCheckpoint(checkpoint);
+  activeTrainer = await createTrainerFromCheckpoint(nextCheckpoint);
   return activeTrainer;
+}
+
+async function loadCheckpointForRun(runId: string) {
+  const { getTrainingRun } = await loadTrainerStorage();
+  return (await getTrainingRun(runId))?.checkpoint ?? null;
 }
 
 async function stopActiveTrainer() {
@@ -246,7 +269,7 @@ function postTrainingEvent(sessionId: number, signal: AbortSignal, event: Traine
 
 async function createNewTrainer(
   file: Extract<TrainerCommand, { file: unknown }>["file"],
-  trainingConfig: Extract<TrainerCommand, { trainingConfig: unknown }>["trainingConfig"],
+  trainingConfig: TrainingConfig,
 ) {
   const { BrowserTrainer } = await loadTrainerRuntime();
   return BrowserTrainer.createNew(file, trainingConfig);
@@ -254,7 +277,7 @@ async function createNewTrainer(
 
 async function createTrainerFromCheckpoint(
   checkpoint: Extract<TrainerCommand, { checkpoint: unknown }>["checkpoint"],
-  trainingConfig?: Extract<TrainerCommand, { trainingConfig: unknown }>["trainingConfig"],
+  trainingConfig?: TrainingConfig,
 ) {
   const { BrowserTrainer } = await loadTrainerRuntime();
   return BrowserTrainer.fromCheckpoint(checkpoint, trainingConfig);

@@ -1,10 +1,8 @@
-![Train GPT in Browser banner](public/train-gpt-in-browser-banner.webp)
-
-![Train GPT in Browser screenshot](public/screenshot.webp)
+![Train GPT in Browser banner](public/banner.webp)
 
 # Train GPT in Browser
 
-Train a small character-level GPT directly in your browser (with an optional Electron desktop app) on newline-delimited text and generate strings that follow the character patterns, structure, and common sequences learned from that dataset. Use one of the built-in datasets or upload your own `.txt` file, edit it locally, resume from browser checkpoints, and export a DreamPhraseGPT-compatible `.model` file.
+Train a small character-level GPT directly in your browser (with an optional Electron desktop app) on newline-delimited text. Use the built-in datasets or upload your own `.txt` file, edit it locally, resume from browser checkpoints, generate samples, like results, and export a DreamPhraseGPT-compatible `.model` file.
 
 Example outputs trained on English words include `glossoscope`, `heartways`, `bulletine`, `joulemaker`, `braqueousness`, `chlorosiphon`, `langeling`, `margariums`, `outtravelers`, and `zamoralize`.
 
@@ -15,11 +13,17 @@ Example outputs trained on U.S. baby names include `Miryella`, `Beliana`, `Camil
 ## [Live demo](https://cpauldev.github.io/train-gpt-in-browser/) | [Releases](https://github.com/cpauldev/train-gpt-in-browser/releases)
 
 | Platform | File |
-|---|---|
-| Windows | [Train GPT in Browser Setup 0.1.1.exe](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.1.1/Train.GPT.in.Browser.Setup.0.1.1.exe) |
-| macOS Apple Silicon | [Train GPT in Browser-0.1.1-arm64.dmg](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.1.1/Train.GPT.in.Browser-0.1.1-arm64.dmg) |
-| macOS Intel | [Train GPT in Browser-0.1.1.dmg](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.1.1/Train.GPT.in.Browser-0.1.1.dmg) |
-| Linux | [Train GPT in Browser-0.1.1.AppImage](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.1.1/Train.GPT.in.Browser-0.1.1.AppImage) |
+| --- | --- |
+| Windows | [Train GPT in Browser Setup 0.2.0.exe](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.2.0/Train.GPT.in.Browser.Setup.0.2.0.exe) |
+| macOS Apple Silicon | [Train GPT in Browser-0.2.0-arm64.dmg](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.2.0/Train.GPT.in.Browser-0.2.0-arm64.dmg) |
+| macOS Intel | [Train GPT in Browser-0.2.0.dmg](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.2.0/Train.GPT.in.Browser-0.2.0.dmg) |
+| Linux | [Train GPT in Browser-0.2.0.AppImage](https://github.com/cpauldev/train-gpt-in-browser/releases/download/v0.2.0/Train.GPT.in.Browser-0.2.0.AppImage) |
+
+![Train GPT in Browser datasets screen](public/screenshot_1.webp)
+
+![Train GPT in Browser editor screen](public/screenshot_2.webp)
+
+![Train GPT in Browser results screen](public/screenshot_3.webp)
 
 > Note: The demo may not run reliably on some phones and tablets. The app falls back to CPU when WebGPU is unavailable, but mobile browser support, available memory, and compute performance vary widely.
 
@@ -40,6 +44,8 @@ npm run dev
 ```
 
 Open `http://localhost:5173`, choose a built-in dataset or upload a plain-text `.txt` file, then start training from the **Training** tab.
+
+After training completes, the app automatically starts generating samples. Results stream in as they are inferred, with temperature controls, `tokens/s`, and saved likes.
 
 ## Desktop app
 
@@ -81,8 +87,9 @@ Dataset rules are defined by the trainer itself:
 The browser UI exposes these run settings:
 
 - Backend: `auto`, `webgpu`, or `cpu`
+- Feedback mode
 - Seed
-- Steps
+- Steps, or additional steps when continuing
 - Batch size
 - Block size
 - Layer count
@@ -93,7 +100,7 @@ The browser UI exposes these run settings:
 - Samples to generate after training
 - Default generation temperature
 
-The app keeps the latest run for each dataset file. Starting a fresh run for the same file replaces the previous saved run for that file; resuming continues from the latest checkpoint instead.
+The app keeps the latest run for each dataset file. Starting fresh replaces the saved run for that file; continuing resumes from the latest checkpoint. Model-shape controls are locked after a run exists, while continuation and generation settings remain editable.
 
 ## Architecture and training
 
@@ -108,13 +115,13 @@ The model is a decoder-only, character-level GPT. In this browser implementation
 - Exact-match source filtering with a Bloom filter embedded in checkpoints and exports
 - DreamPhraseGPT-compatible `.model` export that packages an ONNX graph, tokenizer metadata, and source-filter metadata
 
-The default browser settings use a small 4-layer, 4-head, 128-dimensional model with 32-token context.
+The default browser settings use a small 4-layer, 4-head, 128-dimensional model with 32-token context and 1,000 training steps.
 
 On a new run, the app trims and filters the dataset, shuffles the documents, builds a character vocabulary, and converts the data into a single training stream. Training samples random contiguous windows from that stream, uses next-token cross-entropy, runs for a fixed number of sampled steps, and linearly decays the learning rate toward zero. There is no validation split, epoch-based loop, or warmup schedule.
 
-Training runs in `src/workers/trainer-worker.ts` Web Worker so the React UI stays responsive while the TensorFlow.js runtime handles the forward pass, backpropagation, checkpointing, and sample generation. The runtime prefers `webgpu` and falls back to `cpu` if needed. Checkpoints include the model, optimizer, tokenizer, dataset state, RNG state, and resume metadata, with autosaves during training and again at completion.
+Training runs in `src/workers/trainer-worker.ts` Web Worker so the React UI stays responsive while the TensorFlow.js runtime handles the forward pass, backpropagation, and checkpointing. The runtime prefers `webgpu` and falls back to `cpu` if needed. Checkpoints include the model, optimizer, tokenizer, dataset state, RNG state, and resume metadata, with autosaves during training and again at completion.
 
-Generation is autoregressive at the character level. The worker retries outputs that match source lines via a Bloom filter, which can occasionally reject a novel string because Bloom filters have false positives. Exported `.model` files use the DreamPhraseGPT ONNX bundle format. Compared with [`DreamPhraseGPT`](https://github.com/cpauldev/dreamphrase-gpt), this project keeps the same high-level model family and `.model` export format, but uses a browser-native TensorFlow.js runtime instead of the Python project's accelerator stack such as CUDA, MPS, AMP, or `torch.compile`.
+Generation is autoregressive at the character level, streams partial samples to the UI, and retries outputs that match source lines via a Bloom filter. Exported `.model` files use the DreamPhraseGPT ONNX bundle format. Compared with [`DreamPhraseGPT`](https://github.com/cpauldev/dreamphrase-gpt), this project keeps the same high-level model family and `.model` export format, but uses a browser-native TensorFlow.js runtime instead of the Python project's accelerator stack such as CUDA, MPS, AMP, or `torch.compile`.
 
 ## Offline Behavior
 

@@ -1,0 +1,43 @@
+diff --git a/out/util/electronGet.js b/out/util/electronGet.js
+index 97b8e6d..7bb5708 100644
+--- a/out/util/electronGet.js
++++ b/out/util/electronGet.js
+@@ -184,12 +184,37 @@ async function extractArchive(file, dir) {
+             throw new Error(`Extraction of ${path.basename(file)} produced no files`);
+         }
+         await fs.rm(dir, { recursive: true, force: true });
+-        await fs.rename(tmpDir, dir);
++        await renameExtractedArchive(tmpDir, dir);
+     }
+     finally {
+         await release().catch(err => builder_util_1.log.warn({ err }, "failed to release lockfile"));
+     }
+ }
++async function renameExtractedArchive(from, to) {
++    const maxAttempts = process.platform === "win32" ? 20 : 1;
++    let lastError = null;
++    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
++        try {
++            await fs.rename(from, to);
++            return;
++        }
++        catch (error) {
++            lastError = error;
++            const code = error === null || error === void 0 ? void 0 : error.code;
++            if (process.platform !== "win32" || (code !== "EPERM" && code !== "EACCES")) {
++                throw error;
++            }
++            await new Promise(resolve => setTimeout(resolve, attempt * 250));
++        }
++    }
++    if (process.platform === "win32") {
++        await fs.rm(to, { recursive: true, force: true });
++        await fs.cp(from, to, { recursive: true });
++        await fs.rm(from, { recursive: true, force: true });
++        return;
++    }
++    throw lastError;
++}
+ async function downloadArtifactToFile(config, label) {
+     var _a, _b, _c, _d;
+     // Serialize concurrent downloads of the same artifact across vitest workers to prevent @electron/get's

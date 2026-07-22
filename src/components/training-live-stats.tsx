@@ -1,9 +1,9 @@
 import { Liveline, type LivelinePoint } from "liveline";
 import { type MutableRefObject, useMemo, useRef, useState } from "react";
-import { StatCard } from "@/components/stat-card";
+import { MetricCard } from "@/components/metric-card";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Group } from "@/components/ui/group";
+import { Group, GroupSeparator } from "@/components/ui/group";
 import {
   Progress,
   ProgressIndicator,
@@ -18,7 +18,7 @@ import {
 } from "@/lib/training-telemetry";
 import { useAnimatedValue } from "@/lib/use-animated-value";
 
-type TrainingMetricKey = "loss" | "stepsPerSecond" | "tokPerSecond";
+type TrainingMetricKey = "loss" | "stepsPerSecond" | "tokPerSecond" | "totalTokens";
 type ChartTelemetryPoint = Pick<TrainingTelemetryPoint, "elapsedTimeSeconds" | "step" | "time">;
 type TimelineAnchorMode = "anchored-now" | "elapsed" | "point-time";
 const METRIC_OPTIONS: Array<{
@@ -40,6 +40,11 @@ const METRIC_OPTIONS: Array<{
     accent: "#3a76f0",
     label: "Steps/s",
     valueKey: "stepsPerSecond",
+  },
+  {
+    accent: "#9333ea",
+    label: "Tokens processed",
+    valueKey: "totalTokens",
   },
 ];
 
@@ -106,7 +111,11 @@ export function TrainingLiveStats({
   const animatedTotalTokens = useAnimatedValue(latestPoint?.totalTokens ?? 0, {
     enabled: animating,
   });
-  const displayedLoss = latestPoint ? animatedLoss : undefined;
+  const displayedLoss = latestPoint
+    ? Number.isFinite(animatedLoss)
+      ? animatedLoss
+      : latestPoint.loss
+    : undefined;
   const displayedTokPerSecond = latestPoint ? animatedTokPerSecond : undefined;
   const displayedStepsPerSecond = latestPoint ? animatedStepsPerSecond : undefined;
   const displayedTotalTokens = latestPoint ? animatedTotalTokens : undefined;
@@ -142,7 +151,7 @@ export function TrainingLiveStats({
 
         <div className="grid gap-2 lg:grid-cols-2">
           {statCards.map((card) => (
-            <StatCard key={card.label} label={card.label} value={card.value} />
+            <MetricCard key={card.label} label={card.label} value={card.value} />
           ))}
         </div>
       </section>
@@ -150,28 +159,34 @@ export function TrainingLiveStats({
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <Group>
-            {METRIC_OPTIONS.map((option) => (
-              <Button
-                key={option.valueKey}
-                size="xs"
-                variant={selectedMetric === option.valueKey ? "outline" : "secondary"}
-                onClick={() => setSelectedMetric(option.valueKey)}
-              >
-                {option.label}
-              </Button>
+            {METRIC_OPTIONS.map((option, index) => (
+              <>
+                <Button
+                  key={option.valueKey}
+                  size="default"
+                  variant={selectedMetric === option.valueKey ? "default" : "outline"}
+                  onClick={() => setSelectedMetric(option.valueKey)}
+                >
+                  {option.label}
+                </Button>
+                {index < METRIC_OPTIONS.length - 1 && <GroupSeparator />}
+              </>
             ))}
           </Group>
 
           <Group>
-            {WINDOW_OPTIONS.map((option) => (
-              <Button
-                key={option.seconds}
-                size="xs"
-                variant={selectedWindowSeconds === option.seconds ? "outline" : "secondary"}
-                onClick={() => setSelectedWindowSeconds(option.seconds)}
-              >
-                {option.label}
-              </Button>
+            {WINDOW_OPTIONS.map((option, index) => (
+              <>
+                <Button
+                  key={option.seconds}
+                  size="default"
+                  variant={selectedWindowSeconds === option.seconds ? "default" : "outline"}
+                  onClick={() => setSelectedWindowSeconds(option.seconds)}
+                >
+                  {option.label}
+                </Button>
+                {index < WINDOW_OPTIONS.length - 1 && <GroupSeparator />}
+              </>
             ))}
           </Group>
         </div>
@@ -180,7 +195,7 @@ export function TrainingLiveStats({
           {chartPoints.length === 0 && !isTraining ? (
             <Empty className="min-h-56 bg-muted/30">
               <EmptyHeader>
-                <EmptyTitle>No Training History Yet</EmptyTitle>
+                <EmptyTitle>No training history yet</EmptyTitle>
                 <EmptyDescription>
                   Start training to see loss, token throughput, and step rate over time.
                 </EmptyDescription>
@@ -252,13 +267,16 @@ function TrainingTelemetryChart({
   const timelineOriginSeconds = chartLatestWallClockSeconds - latestElapsedSeconds;
   const chartData = useMemo(
     () =>
-      points.map((point) => ({
-        time: timelineOriginSeconds + (point.elapsedTimeSeconds ?? 0),
-        value: point[selectedMetric],
-      })),
+      points
+        .filter((point) => Number.isFinite(point[selectedMetric]))
+        .map((point) => ({
+          time: timelineOriginSeconds + (point.elapsedTimeSeconds ?? 0),
+          value: point[selectedMetric],
+        })),
     [points, selectedMetric, timelineOriginSeconds],
   );
-  const chartValue = latestPoint?.[selectedMetric] ?? 0;
+  const chartValue =
+    latestPoint && Number.isFinite(latestPoint[selectedMetric]) ? latestPoint[selectedMetric] : 0;
   const livelineKey = `${runId ?? "no-run"}:${selectedMetric}`;
 
   return (
@@ -285,7 +303,7 @@ function TrainingTelemetryChart({
         scrub={chartData.length > 1}
         showValue
         theme={theme}
-        valueMomentumColor={selectedMetric !== "loss"}
+        valueMomentumColor={selectedMetric !== "loss" && selectedMetric !== "totalTokens"}
         window={selectedWindowSeconds}
       />
     </div>
@@ -295,6 +313,10 @@ function TrainingTelemetryChart({
 function formatMetricValue(metric: TrainingMetricKey, value: number) {
   if (metric === "loss") {
     return formatLossValue(value);
+  }
+
+  if (metric === "totalTokens") {
+    return formatCountValue(value);
   }
 
   return formatRateValue(value);

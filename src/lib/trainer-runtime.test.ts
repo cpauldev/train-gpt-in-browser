@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_LOSS_READBACK_INTERVAL, DEFAULT_TRAINING_CONFIG } from "@/lib/trainer-defaults";
 import { BrowserTrainer } from "@/lib/trainer-runtime";
-import {
-  createGenerationConfig,
-  createModelConfigFromDimensions,
-  type TrainingConfig,
-} from "@/lib/trainer-types";
+import { createModelConfigFromDimensions, type TrainingConfig } from "@/lib/trainer-types";
 
 function createTestTrainingConfig(): TrainingConfig {
   return {
@@ -34,13 +31,12 @@ function createTestTrainingConfig(): TrainingConfig {
 }
 
 describe("trainer-runtime", () => {
+  it("uses the measured loss readback cadence by default", () => {
+    expect(DEFAULT_TRAINING_CONFIG.lossReadbackInterval).toBe(DEFAULT_LOSS_READBACK_INTERVAL);
+  });
+
   it("resumes toward the original total step target instead of adding another full run", async () => {
     const trainingConfig = createTestTrainingConfig();
-    const generationConfig = createGenerationConfig({
-      numSamples: 0,
-      requestedBlockSize: trainingConfig.model.blockSize,
-      temperature: 0.8,
-    });
     const file = {
       content: "alpha\nbeta\ngamma\ndelta\n",
       id: "file-1",
@@ -51,7 +47,6 @@ describe("trainer-runtime", () => {
     const firstStepSummaries: number[] = [];
 
     const firstRun = await trainer.train({
-      generationConfig,
       onProgress: (summary) => {
         firstStepSummaries.push(summary.completedSteps);
       },
@@ -60,7 +55,6 @@ describe("trainer-runtime", () => {
     expect(firstRun.checkpoint.resumeState.completedSteps).toBe(1);
     expect(firstRun.checkpoint.resumeState.elapsedTrainingSeconds).toBeGreaterThan(0);
     expect(firstRun.checkpoint.optimizerState.step).toBe(1);
-    expect(firstRun.generatedResults).toEqual([]);
 
     trainer.dispose();
 
@@ -74,7 +68,6 @@ describe("trainer-runtime", () => {
     );
 
     const secondRun = await resumedTrainer.train({
-      generationConfig,
       onProgress: () => {},
     });
 
@@ -92,16 +85,11 @@ describe("trainer-runtime", () => {
     resumedTrainer.dispose();
   }, 20000);
 
-  it("only materializes checkpoints when an autosave is due", async () => {
+  it("only materializes checkpoints for autosaves and completion", async () => {
     const trainingConfig = {
       ...createTestTrainingConfig(),
       steps: 2,
     };
-    const generationConfig = createGenerationConfig({
-      numSamples: 0,
-      requestedBlockSize: trainingConfig.model.blockSize,
-      temperature: 0.8,
-    });
     const file = {
       content: "alpha\nbeta\ngamma\ndelta\n",
       id: "file-2",
@@ -111,13 +99,46 @@ describe("trainer-runtime", () => {
     const checkpointStates: boolean[] = [];
 
     await trainer.train({
-      generationConfig,
       onProgress: (summary) => {
         checkpointStates.push(Boolean(summary.checkpoint));
       },
     });
 
-    expect(checkpointStates).toEqual([false, true, true]);
+    expect(checkpointStates).toEqual([false, false, true]);
+
+    trainer.dispose();
+  }, 20000);
+
+  it("still reads loss at telemetry and final training boundaries when cadence skips intermediate steps", async () => {
+    const trainingConfig = {
+      ...createTestTrainingConfig(),
+      lossReadbackInterval: 16,
+      printEvery: 10,
+      steps: 3,
+    };
+    const trainer = await BrowserTrainer.createNew(
+      {
+        content: "alpha\nbeta\ngamma\ndelta\n",
+        id: "file-readback",
+        name: "readback.txt",
+      },
+      trainingConfig,
+    );
+    const telemetryLosses: number[] = [];
+    const telemetryLossReadbacks: boolean[] = [];
+
+    const result = await trainer.train({
+      onProgress: () => {},
+      onTelemetry: (point) => {
+        telemetryLosses.push(point.loss);
+        telemetryLossReadbacks.push(Boolean(point.diagnostics?.lossReadback));
+      },
+    });
+
+    expect(result.checkpoint.resumeState.completedSteps).toBe(3);
+    expect(Number.isFinite(result.checkpoint.resumeState.finalLoss)).toBe(true);
+    expect(telemetryLosses.every((loss) => Number.isFinite(loss))).toBe(true);
+    expect(telemetryLossReadbacks).toEqual([true]);
 
     trainer.dispose();
   }, 20000);

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { RunPanel } from "@/components/run-panel";
+import { ResultsPanel } from "@/components/results-panel";
 import { DEFAULT_GENERATION_CONFIG, DEFAULT_TRAINING_CONFIG } from "@/lib/trainer-defaults";
 import type { TrainingRunRecord } from "@/lib/trainer-types";
 
@@ -106,26 +106,23 @@ function mockMatchMedia(matches: boolean) {
   });
 }
 
-describe("RunPanel", () => {
+describe("ResultsPanel", () => {
   it("renders generated results in the table layout", async () => {
     const onTemperatureChange = vi.fn();
     const onTabChange = vi.fn();
     const onToggleLike = vi.fn();
 
     render(
-      <RunPanel
+      <ResultsPanel
         activeRun={createRun()}
         activeTab="generated"
         displayedResults={Array.from({ length: 12 }, (_, index) => `result-${index + 1}`)}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isGenerating={false}
-        isHydrating={false}
         onGenerate={vi.fn()}
         onTabChange={onTabChange}
         onTemperatureChange={onTemperatureChange}
         onToggleLike={onToggleLike}
-        repoUrl="https://github.com/cpauldev/train-gpt-in-browser"
-        workerReady={true}
       />,
     );
 
@@ -136,6 +133,35 @@ describe("RunPanel", () => {
     expect(onToggleLike).toHaveBeenCalledWith("result-1");
   });
 
+  it("uses the same toggle action for liking and removing likes", () => {
+    const onToggleLike = vi.fn();
+    const run = {
+      ...createRun(),
+      likes: ["result-1"],
+    };
+
+    const props = {
+      activeRun: run,
+      displayedResults: ["result-1"],
+      generationConfig: DEFAULT_GENERATION_CONFIG,
+      isGenerating: false,
+      onGenerate: vi.fn(),
+      onTabChange: vi.fn(),
+      onTemperatureChange: vi.fn(),
+      onToggleLike,
+    };
+
+    const { rerender } = render(<ResultsPanel {...props} activeTab="generated" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^like result-1$/i }));
+
+    rerender(<ResultsPanel {...props} activeTab="likes" />);
+    fireEvent.click(screen.getByRole("button", { name: /^remove result-1 from likes$/i }));
+
+    expect(onToggleLike).toHaveBeenNthCalledWith(1, "result-1");
+    expect(onToggleLike).toHaveBeenNthCalledWith(2, "result-1");
+  });
+
   it("disables generation while a run is actively training", () => {
     const trainingRun = {
       ...createRun(),
@@ -143,19 +169,16 @@ describe("RunPanel", () => {
     };
 
     render(
-      <RunPanel
+      <ResultsPanel
         activeRun={trainingRun}
         activeTab="generated"
         displayedResults={[]}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isGenerating={false}
-        isHydrating={false}
         onGenerate={vi.fn()}
         onTabChange={vi.fn()}
         onTemperatureChange={vi.fn()}
         onToggleLike={vi.fn()}
-        repoUrl="https://github.com/cpauldev/train-gpt-in-browser"
-        workerReady={true}
       />,
     );
 
@@ -164,19 +187,16 @@ describe("RunPanel", () => {
 
   it("shows a loading state while generation is in progress", () => {
     render(
-      <RunPanel
+      <ResultsPanel
         activeRun={createRun()}
         activeTab="generated"
         displayedResults={[]}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isGenerating
-        isHydrating={false}
         onGenerate={vi.fn()}
         onTabChange={vi.fn()}
         onTemperatureChange={vi.fn()}
         onToggleLike={vi.fn()}
-        repoUrl="https://github.com/cpauldev/train-gpt-in-browser"
-        workerReady={true}
       />,
     );
 
@@ -191,19 +211,16 @@ describe("RunPanel", () => {
     };
 
     render(
-      <RunPanel
+      <ResultsPanel
         activeRun={persistedRun}
         activeTab="generated"
         displayedResults={[]}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isGenerating={false}
-        isHydrating={false}
         onGenerate={vi.fn()}
         onTabChange={vi.fn()}
         onTemperatureChange={vi.fn()}
         onToggleLike={vi.fn()}
-        repoUrl="https://github.com/cpauldev/train-gpt-in-browser"
-        workerReady={true}
       />,
     );
 
@@ -212,49 +229,88 @@ describe("RunPanel", () => {
     );
   });
 
+  it("labels the action as regenerate when the current temperature has results", () => {
+    render(
+      <ResultsPanel
+        activeRun={createRun()}
+        activeTab="generated"
+        displayedResults={["alpha"]}
+        generationConfig={DEFAULT_GENERATION_CONFIG}
+        isGenerating={false}
+        onGenerate={vi.fn()}
+        onTabChange={vi.fn()}
+        onTemperatureChange={vi.fn()}
+        onToggleLike={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /^regenerate$/i }).hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+
+  it("disables pending generated result rows until the sample finishes", () => {
+    const onToggleLike = vi.fn();
+
+    render(
+      <ResultsPanel
+        activeRun={createRun()}
+        activeTab="generated"
+        displayedResults={["al", "beta"]}
+        generationConfig={DEFAULT_GENERATION_CONFIG}
+        isGenerating
+        onGenerate={vi.fn()}
+        onTabChange={vi.fn()}
+        onTemperatureChange={vi.fn()}
+        onToggleLike={onToggleLike}
+        pendingResultIndexes={new Set([0])}
+      />,
+    );
+
+    const pendingButton = screen.getByRole("button", { name: /^like al$/i });
+    const finishedButton = screen.getByRole("button", { name: /^like beta$/i });
+
+    expect(pendingButton.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(pendingButton);
+    fireEvent.click(finishedButton);
+
+    expect(onToggleLike).toHaveBeenCalledOnce();
+    expect(onToggleLike).toHaveBeenCalledWith("beta");
+  });
+
   it("shows the empty no-run state when there is no active run", () => {
     render(
-      <RunPanel
+      <ResultsPanel
         activeRun={null}
         activeTab="generated"
         displayedResults={[]}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isGenerating={false}
-        isHydrating={false}
         onGenerate={vi.fn()}
         onTabChange={vi.fn()}
         onTemperatureChange={vi.fn()}
         onToggleLike={vi.fn()}
-        repoUrl="https://github.com/cpauldev/train-gpt-in-browser"
-        workerReady={true}
       />,
     );
 
-    expect(screen.getByText(/train gpt in browser/i)).toBeTruthy();
-    expect(
-      screen.getByText(
-        /train a small character-level gpt directly in your browser.*resumes from browser checkpoints/i,
-      ),
-    ).toBeTruthy();
+    expect(screen.getByText(/results/i)).toBeTruthy();
+    expect(screen.getByText(/complete training first, then generate samples here/i)).toBeTruthy();
   });
 
   it("renders generated results as a single column on mobile", () => {
     mockMatchMedia(true);
 
     render(
-      <RunPanel
+      <ResultsPanel
         activeRun={createRun()}
         activeTab="generated"
         displayedResults={["alpha", "beta"]}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isGenerating={false}
-        isHydrating={false}
         onGenerate={vi.fn()}
         onTabChange={vi.fn()}
         onTemperatureChange={vi.fn()}
         onToggleLike={vi.fn()}
-        repoUrl="https://github.com/cpauldev/train-gpt-in-browser"
-        workerReady={true}
       />,
     );
 

@@ -17,7 +17,9 @@ export const SOURCE_FILTER_MAX_RETRIES = 40;
 export const FALLBACK_HASH_STEP = 0x9e3779b97f4a7c15n;
 export const ACTIVE_RUN_STORAGE_KEY = "dreamphrasegpt-browser:active-run";
 export const ACTIVE_FILE_STORAGE_KEY = "dreamphrasegpt-browser:active-file";
+export const TRAINING_CONFIG_STORAGE_KEY = "dreamphrasegpt-browser:training-config";
 export const AUTOSAVE_STEP_INTERVAL = 250;
+export const DEFAULT_LOSS_READBACK_INTERVAL = 16;
 const DEFAULT_BACKEND_PREFERENCE: BackendPreference = "auto";
 
 export const BUILTIN_DATASETS: {
@@ -54,6 +56,7 @@ export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
   compileRequested: null,
   eps: 1e-8,
   learningRate: 3e-4,
+  lossReadbackInterval: DEFAULT_LOSS_READBACK_INTERVAL,
   model: createModelConfigFromDimensions({
     blockSize: 32,
     nEmbd: 128,
@@ -66,7 +69,7 @@ export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
   requestedDeviceLabel: "browser",
   requestedDtype: "auto",
   seed: 42,
-  steps: 3000,
+  steps: 1000,
   weightDecay: 0.01,
 };
 

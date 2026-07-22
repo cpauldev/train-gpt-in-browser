@@ -203,9 +203,7 @@ export async function deleteWorkspaceFile(fileId: string) {
 export async function listTrainingRuns(): Promise<TrainingRunRecord[]> {
   const db = await getTrainerDb();
   const persistedRuns = await db.getAll("runs");
-  const nextRuns = await Promise.all(
-    persistedRuns.map(async (persistedRun) => inflatePersistedRun(db, persistedRun)),
-  );
+  const nextRuns = persistedRuns.map(hydratePersistedRunShape);
   return nextRuns.sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
@@ -226,23 +224,30 @@ export async function saveTrainingRun(
 ) {
   const db = await getTrainerDb();
   const shouldPersistCheckpoint = Boolean((options?.persistCheckpoint ?? true) && run.checkpoint);
+  const persistedRun =
+    shouldPersistCheckpoint && run.checkpoint
+      ? {
+          ...run,
+          checkpointSavedAt: run.checkpointSavedAt ?? run.checkpoint.exportedAt,
+        }
+      : run;
 
   if (!shouldPersistCheckpoint) {
-    await db.put("runs", stripCheckpoint(run));
-    return run;
+    await db.put("runs", stripCheckpoint(persistedRun));
+    return persistedRun;
   }
 
   const transaction = db.transaction(["checkpoints", "runs"], "readwrite");
-  await transaction.objectStore("runs").put(stripCheckpoint(run));
+  await transaction.objectStore("runs").put(stripCheckpoint(persistedRun));
 
-  if (run.checkpoint) {
+  if (persistedRun.checkpoint) {
     await transaction
       .objectStore("checkpoints")
-      .put(createStoredTrainingCheckpoint(run.id, run.checkpoint));
+      .put(createStoredTrainingCheckpoint(persistedRun.id, persistedRun.checkpoint));
   }
 
   await transaction.done;
-  return run;
+  return persistedRun;
 }
 
 export async function saveTrainingCheckpoint(
@@ -250,7 +255,23 @@ export async function saveTrainingCheckpoint(
   checkpoint: NonNullable<TrainingRunRecord["checkpoint"]>,
 ) {
   const db = await getTrainerDb();
-  await db.put("checkpoints", createStoredTrainingCheckpoint(runId, checkpoint));
+  const transaction = db.transaction(["checkpoints", "runs"], "readwrite");
+  const runsStore = transaction.objectStore("runs");
+  const existingRun = await runsStore.get(runId);
+
+  await transaction
+    .objectStore("checkpoints")
+    .put(createStoredTrainingCheckpoint(runId, checkpoint));
+
+  if (existingRun) {
+    await runsStore.put({
+      ...existingRun,
+      checkpointSavedAt: checkpoint.exportedAt,
+      updatedAt: Math.max(existingRun.updatedAt, checkpoint.exportedAt),
+    });
+  }
+
+  await transaction.done;
   return checkpoint;
 }
 
@@ -263,9 +284,18 @@ export async function saveTrainingRunArtifacts(
   const storedArtifacts = await Promise.all(
     artifactSetToList(artifactSet).map((artifact) => persistStoredArtifact(run.id, artifact, now)),
   );
-  const nextRun = attachArtifactSummaries(run, storedArtifacts);
   const transaction = db.transaction(["runs", "artifacts"], "readwrite");
   try {
+    const existingRun = await transaction.objectStore("runs").get(run.id);
+    const nextRun = attachArtifactSummaries(
+      {
+        ...run,
+        checkpointSavedAt:
+          run.checkpointSavedAt ?? existingRun?.checkpointSavedAt ?? run.checkpoint?.exportedAt,
+      },
+      storedArtifacts,
+    );
+
     await transaction.objectStore("runs").put(stripCheckpoint(nextRun));
     for (const artifact of storedArtifacts) {
       await transaction.objectStore("artifacts").put(artifact);

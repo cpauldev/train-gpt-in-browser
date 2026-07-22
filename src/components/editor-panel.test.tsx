@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { SidebarEditorView } from "@/components/sidebar-editor-view";
+import { EditorPanel } from "@/components/editor-panel";
 import { DEFAULT_GENERATION_CONFIG, DEFAULT_TRAINING_CONFIG } from "@/lib/trainer-defaults";
 import type { TrainingRunRecord, WorkspaceFile } from "@/lib/trainer-types";
 
@@ -98,7 +98,7 @@ function createRun(): TrainingRunRecord {
   };
 }
 
-describe("SidebarEditorView", () => {
+describe("EditorPanel", () => {
   it("supports back navigation and editing", async () => {
     const user = userEvent.setup();
     const onBack = vi.fn();
@@ -113,14 +113,13 @@ describe("SidebarEditorView", () => {
     const onTrainingConfigChange = vi.fn();
 
     render(
-      <SidebarEditorView
+      <EditorPanel
         canTrain
         draftContent={selectedFile.content}
         draftName={selectedFile.name}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isTraining={false}
         onBack={onBack}
-        onResetLocalData={vi.fn()}
         onDeleteFile={onDeleteFile}
         onDeleteModel={onDeleteModel}
         onDownloadModel={onDownloadModel}
@@ -149,7 +148,7 @@ describe("SidebarEditorView", () => {
       target: { value: "renamed.txt" },
     });
     fireEvent.click(screen.getByRole("button", { name: /download model/i }));
-    fireEvent.click(screen.getByRole("button", { name: /delete model/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^delete model$/i }));
     await user.click(screen.getByRole("tab", { name: /source/i }));
     expect(await screen.findByRole("textbox", { name: /source text/i })).toBeTruthy();
     await user.click(screen.getByRole("tab", { name: /training/i }));
@@ -168,16 +167,52 @@ describe("SidebarEditorView", () => {
     expect(onDeleteFile).toHaveBeenCalledOnce();
   });
 
+  it("requests confirmation before deleting a model", async () => {
+    const user = userEvent.setup();
+    const onDeleteModel = vi.fn();
+
+    render(
+      <EditorPanel
+        canTrain
+        draftContent={selectedFile.content}
+        draftName={selectedFile.name}
+        generationConfig={DEFAULT_GENERATION_CONFIG}
+        isTraining={false}
+        onBack={vi.fn()}
+        onDeleteModel={onDeleteModel}
+        onDraftContentChange={vi.fn()}
+        onDraftNameChange={vi.fn()}
+        onGenerationConfigChange={vi.fn()}
+        onStartTraining={vi.fn().mockResolvedValue(undefined)}
+        onTrainingConfigChange={vi.fn()}
+        selectedFile={selectedFile}
+        selectedFileSummary={{
+          characterCount: 9,
+          documentCount: 2,
+          lineCount: 2,
+          tokenCount: 11,
+          vocabSize: 8,
+        }}
+        selectedRun={createRun()}
+        trainingConfig={DEFAULT_TRAINING_CONFIG}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: /details/i }));
+    await user.click(screen.getByRole("button", { name: /^delete model$/i }));
+
+    expect(onDeleteModel).toHaveBeenCalledOnce();
+  });
+
   it("locks the file name for built-in datasets", () => {
     render(
-      <SidebarEditorView
+      <EditorPanel
         canTrain
         draftContent={selectedFile.content}
         draftName="english_words.txt"
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isTraining={false}
         onBack={vi.fn()}
-        onResetLocalData={vi.fn()}
         onDraftContentChange={vi.fn()}
         onDraftNameChange={vi.fn()}
         onGenerationConfigChange={vi.fn()}
@@ -200,25 +235,22 @@ describe("SidebarEditorView", () => {
     expect(screen.getByDisplayValue("english_words.txt").hasAttribute("disabled")).toBe(true);
   });
 
-  it("keeps the download button enabled when only checkpointSavedAt is present", () => {
+  it("shows lightweight details and keeps download enabled when only checkpointSavedAt is present", () => {
     const persistedRun: TrainingRunRecord = {
       ...createRun(),
       checkpoint: undefined,
       checkpointSavedAt: Date.now(),
     };
-    const onEnsureRunDetails = vi.fn().mockResolvedValue(undefined);
 
     render(
-      <SidebarEditorView
+      <EditorPanel
         canTrain
         draftContent={selectedFile.content}
         draftName={selectedFile.name}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isTraining={false}
         onBack={vi.fn()}
-        onResetLocalData={vi.fn()}
         onDownloadModel={vi.fn()}
-        onEnsureRunDetails={onEnsureRunDetails}
         onDraftContentChange={vi.fn()}
         onDraftNameChange={vi.fn()}
         onGenerationConfigChange={vi.fn()}
@@ -241,7 +273,52 @@ describe("SidebarEditorView", () => {
     expect(screen.getByRole("button", { name: /download model/i }).hasAttribute("disabled")).toBe(
       false,
     );
-    expect(onEnsureRunDetails).toHaveBeenCalledOnce();
+    expect(screen.getByText("Parameters")).toBeTruthy();
+  });
+
+  it("shows cached model size in the download button", () => {
+    const persistedRun: TrainingRunRecord = {
+      ...createRun(),
+      artifacts: {
+        model: {
+          fileName: "ideas.model",
+          kind: "model",
+          sizeBytes: 1024 * 1024 * 2.5,
+          storage: "opfs",
+          updatedAt: Date.now(),
+        },
+      },
+    };
+
+    render(
+      <EditorPanel
+        canTrain
+        draftContent={selectedFile.content}
+        draftName={selectedFile.name}
+        generationConfig={DEFAULT_GENERATION_CONFIG}
+        isTraining={false}
+        onBack={vi.fn()}
+        onDownloadModel={vi.fn()}
+        onDraftContentChange={vi.fn()}
+        onDraftNameChange={vi.fn()}
+        onGenerationConfigChange={vi.fn()}
+        onStartTraining={vi.fn().mockResolvedValue(undefined)}
+        onTrainingConfigChange={vi.fn()}
+        selectedFile={selectedFile}
+        selectedFileSummary={{
+          characterCount: 9,
+          documentCount: 2,
+          lineCount: 2,
+          tokenCount: 11,
+          vocabSize: 8,
+        }}
+        selectedRun={persistedRun}
+        trainingConfig={DEFAULT_TRAINING_CONFIG}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: /details/i }));
+    expect(screen.getByRole("button", { name: /download model \(2.5 MB\)/i })).toBeTruthy();
   });
 
   it("ignores invalid numeric input instead of writing NaN into training config", async () => {
@@ -249,14 +326,13 @@ describe("SidebarEditorView", () => {
     const onTrainingConfigChange = vi.fn();
 
     render(
-      <SidebarEditorView
+      <EditorPanel
         canTrain
         draftContent={selectedFile.content}
         draftName={selectedFile.name}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isTraining={false}
         onBack={vi.fn()}
-        onResetLocalData={vi.fn()}
         onDraftContentChange={vi.fn()}
         onDraftNameChange={vi.fn()}
         onGenerationConfigChange={vi.fn()}
@@ -284,6 +360,47 @@ describe("SidebarEditorView", () => {
     expect(onTrainingConfigChange).not.toHaveBeenCalled();
   });
 
+  it("treats steps as a next-session value and locks model shape after a run exists", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <EditorPanel
+        canTrain
+        draftContent={selectedFile.content}
+        draftName={selectedFile.name}
+        generationConfig={DEFAULT_GENERATION_CONFIG}
+        isTraining={false}
+        onBack={vi.fn()}
+        onDraftContentChange={vi.fn()}
+        onDraftNameChange={vi.fn()}
+        onGenerationConfigChange={vi.fn()}
+        onResumeTraining={vi.fn().mockResolvedValue(undefined)}
+        onStartTraining={vi.fn().mockResolvedValue(undefined)}
+        onTrainingConfigChange={vi.fn()}
+        selectedFile={selectedFile}
+        selectedFileSummary={{
+          characterCount: 9,
+          documentCount: 2,
+          lineCount: 2,
+          tokenCount: 11,
+          vocabSize: 8,
+        }}
+        selectedRun={createRun()}
+        trainingConfig={{ ...DEFAULT_TRAINING_CONFIG, steps: 1000 }}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: /training/i }));
+    await user.click(screen.getByLabelText(/toggle training controls/i));
+
+    expect((screen.getByLabelText(/additional steps/i) as HTMLInputElement).value).toBe("1000");
+    expect((screen.getByLabelText(/block size/i) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText(/layers/i) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText(/embedding width/i) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText(/attention heads/i) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText(/learning rate/i) as HTMLInputElement).disabled).toBe(false);
+  });
+
   it("opens the live training stats automatically when the selected run starts training", async () => {
     const initialRun = createRun();
     const trainingRun: TrainingRunRecord = {
@@ -303,14 +420,13 @@ describe("SidebarEditorView", () => {
     };
 
     const { rerender } = render(
-      <SidebarEditorView
+      <EditorPanel
         canTrain
         draftContent={selectedFile.content}
         draftName={selectedFile.name}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isTraining={false}
         onBack={vi.fn()}
-        onResetLocalData={vi.fn()}
         onDraftContentChange={vi.fn()}
         onDraftNameChange={vi.fn()}
         onGenerationConfigChange={vi.fn()}
@@ -331,14 +447,13 @@ describe("SidebarEditorView", () => {
     );
 
     rerender(
-      <SidebarEditorView
+      <EditorPanel
         canTrain
         draftContent={selectedFile.content}
         draftName={selectedFile.name}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isTraining
         onBack={vi.fn()}
-        onResetLocalData={vi.fn()}
         onDraftContentChange={vi.fn()}
         onDraftNameChange={vi.fn()}
         onGenerationConfigChange={vi.fn()}
@@ -381,14 +496,13 @@ describe("SidebarEditorView", () => {
     };
 
     render(
-      <SidebarEditorView
+      <EditorPanel
         canTrain
         draftContent={selectedFile.content}
         draftName={selectedFile.name}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isTraining
         onBack={vi.fn()}
-        onResetLocalData={vi.fn()}
         onDraftContentChange={vi.fn()}
         onDraftNameChange={vi.fn()}
         onGenerationConfigChange={vi.fn()}
@@ -419,14 +533,13 @@ describe("SidebarEditorView", () => {
     };
 
     render(
-      <SidebarEditorView
+      <EditorPanel
         canTrain
         draftContent={selectedFile.content}
         draftName={selectedFile.name}
         generationConfig={DEFAULT_GENERATION_CONFIG}
         isTraining
         onBack={vi.fn()}
-        onResetLocalData={vi.fn()}
         onDraftContentChange={vi.fn()}
         onDraftNameChange={vi.fn()}
         onGenerationConfigChange={vi.fn()}

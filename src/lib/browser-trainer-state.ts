@@ -72,14 +72,15 @@ export function reconcileInterruptedRuns(runs: TrainingRunRecord[], updatedAt = 
     }
 
     interruptedRunCount += 1;
-    const message = run.checkpoint
+    const hasSavedCheckpoint = Boolean(run.checkpoint || run.checkpointSavedAt);
+    const message = hasSavedCheckpoint
       ? "Browser session ended before training completed. Resume this run to continue from the latest checkpoint."
       : "Browser session ended before the first checkpoint was saved. Start training again to recreate this run.";
     const nextRun: TrainingRunRecord = {
       ...run,
-      lastError: run.checkpoint ? run.lastError : message,
-      logs: appendLogs(run.logs, [createLogEntry(message, run.checkpoint ? "line" : "error")]),
-      status: run.checkpoint ? "idle" : "error",
+      lastError: hasSavedCheckpoint ? run.lastError : message,
+      logs: appendLogs(run.logs, [createLogEntry(message, hasSavedCheckpoint ? "line" : "error")]),
+      status: hasSavedCheckpoint ? "idle" : "error",
       updatedAt,
     };
 

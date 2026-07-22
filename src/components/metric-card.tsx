@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export function StatCard({
+export function MetricCard({
   label,
   labelAccessory,
   value,

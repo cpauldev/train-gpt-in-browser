@@ -1,41 +1,45 @@
 import { CircleHelp } from "lucide-react";
 
-import { StatCard } from "@/components/stat-card";
-import { Badge } from "@/components/ui/badge";
+import { MetricCard } from "@/components/metric-card";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatNumber } from "@/lib/trainer-core";
 import { formatBytes, formatTimestamp } from "@/lib/trainer-presentation";
-import type { TrainingRunRecord } from "@/lib/trainer-types";
+import type { ModelConfig, TrainingRunRecord } from "@/lib/trainer-types";
 
 export function InspectView({ run }: { run: TrainingRunRecord }) {
   const { checkpoint } = run;
-
-  if (!checkpoint) {
-    return null;
-  }
+  const modelConfig = checkpoint?.modelConfig ?? run.trainingConfig.model;
+  const tokenizerVocabSize = checkpoint?.tokenizer.vocabSize ?? run.datasetStats.vocabSize;
+  const completedSteps =
+    checkpoint?.resumeState.completedSteps ??
+    run.telemetry.at(-1)?.step ??
+    run.trainingConfig.steps;
+  const finalLoss = checkpoint?.resumeState.finalLoss ?? run.telemetry.at(-1)?.loss;
+  const totalTokens = checkpoint?.resumeState.totalTokens ?? run.telemetry.at(-1)?.totalTokens;
+  const datasetTokenCount = checkpoint?.datasetData.length ?? run.datasetStats.tokenCount;
 
   const backend =
-    checkpoint.requestedBackend === checkpoint.resolvedBackend
-      ? checkpoint.resolvedBackend
-      : `${checkpoint.resolvedBackend} (${checkpoint.requestedBackend} requested)`;
+    checkpoint && checkpoint.requestedBackend !== checkpoint.resolvedBackend
+      ? `${checkpoint.resolvedBackend} (${checkpoint.requestedBackend} requested)`
+      : run.trainingConfig.requestedBackend;
 
   const modelStats = [
-    { label: "Parameters", value: formatNumber(countParameters(checkpoint)) },
-    { label: "Vocab size", value: formatNumber(checkpoint.modelConfig.vocabSize) },
+    { label: "Parameters", value: formatNumber(countModelParameters(modelConfig)) },
+    { label: "Vocab size", value: formatNumber(modelConfig.vocabSize) },
     {
       label: "Block size",
-      value: formatNumber(checkpoint.modelConfig.blockSize),
+      value: formatNumber(modelConfig.blockSize),
       tooltip: "Maximum number of tokens the model attends to at once (context length).",
     },
-    { label: "Layers", value: formatNumber(checkpoint.modelConfig.nLayer) },
+    { label: "Layers", value: formatNumber(modelConfig.nLayer) },
     {
       label: "Embedding dim",
-      value: formatNumber(checkpoint.modelConfig.nEmbd),
+      value: formatNumber(modelConfig.nEmbd),
       tooltip: "Size of the vector used to represent each token internally.",
     },
     {
       label: "Attention heads",
-      value: formatNumber(checkpoint.modelConfig.nHead),
+      value: formatNumber(modelConfig.nHead),
       tooltip: "Number of parallel attention patterns computed per layer.",
     },
   ];
@@ -48,7 +52,12 @@ export function InspectView({ run }: { run: TrainingRunRecord }) {
           rows={[
             { label: "Created", value: formatTimestamp(run.createdAt) },
             { label: "Modified", value: formatTimestamp(run.updatedAt) },
-            { label: "Storage", value: "Browser checkpoint (IndexedDB)" },
+            {
+              label: "Storage",
+              value: run.checkpointSavedAt
+                ? `Browser checkpoint (${formatTimestamp(run.checkpointSavedAt)})`
+                : "Run metadata",
+            },
             {
               label: "Model export",
               value: run.artifacts?.model
@@ -63,7 +72,7 @@ export function InspectView({ run }: { run: TrainingRunRecord }) {
         <h2 className="font-semibold text-lg">Model</h2>
         <div className="grid gap-2 lg:grid-cols-2">
           {modelStats.map((stat) => (
-            <StatCard
+            <MetricCard
               key={stat.label}
               label={stat.label}
               labelAccessory={stat.tooltip ? <InspectTooltip>{stat.tooltip}</InspectTooltip> : null}
@@ -75,18 +84,17 @@ export function InspectView({ run }: { run: TrainingRunRecord }) {
           rows={[
             {
               label: "MLP type",
-              value: checkpoint.modelConfig.mlpType,
-              badge: true,
+              value: modelConfig.mlpType,
               tooltip: "Feed-forward network variant used in each transformer block.",
             },
             {
               label: "MLP hidden dim",
-              value: formatNumber(checkpoint.modelConfig.mlpHiddenDim),
+              value: formatNumber(modelConfig.mlpHiddenDim),
               tooltip: "Internal width of the feed-forward layer inside each transformer block.",
             },
             {
               label: "Weight tensors",
-              value: formatNumber(checkpoint.weights.length),
+              value: formatNumber(getWeightTensorCount(modelConfig)),
               tooltip: "Number of individual weight arrays stored in the checkpoint.",
             },
           ]}
@@ -99,11 +107,11 @@ export function InspectView({ run }: { run: TrainingRunRecord }) {
           rows={[
             {
               label: "Vocab size",
-              value: `${formatNumber(checkpoint.tokenizer.vocabSize)} chars`,
+              value: `${formatNumber(tokenizerVocabSize)} chars`,
             },
             {
               label: "BOS token ID",
-              value: formatNumber(checkpoint.tokenizer.bosId),
+              value: checkpoint ? formatNumber(checkpoint.tokenizer.bosId) : "0",
               tooltip: "Token ID prepended to each input sequence as a start marker.",
             },
           ]}
@@ -116,7 +124,7 @@ export function InspectView({ run }: { run: TrainingRunRecord }) {
           rows={[
             {
               label: "Steps completed",
-              value: formatNumber(checkpoint.resumeState.completedSteps),
+              value: formatNumber(completedSteps),
             },
             {
               label: "Steps (last run)",
@@ -124,26 +132,28 @@ export function InspectView({ run }: { run: TrainingRunRecord }) {
             },
             {
               label: "Final loss",
-              value: Number.isFinite(checkpoint.resumeState.finalLoss)
-                ? checkpoint.resumeState.finalLoss.toFixed(4)
-                : "Unknown",
+              value: Number.isFinite(finalLoss) ? Number(finalLoss).toFixed(4) : "Unknown",
             },
             {
               label: "Tokens processed",
-              value: formatNumber(checkpoint.resumeState.totalTokens),
+              value: totalTokens === undefined ? "Unknown" : formatNumber(totalTokens),
               tooltip: "Cumulative tokens seen across all training runs on this checkpoint.",
             },
             {
               label: "Dataset tokens",
-              value: formatNumber(checkpoint.datasetData.length),
+              value: formatNumber(datasetTokenCount),
               tooltip: "Number of tokens in the tokenized training dataset.",
             },
-            {
-              label: "Dedup filter",
-              value: `${checkpoint.sourceFilter.kind} (${formatBytes(checkpoint.sourceFilter.bits.byteLength)})`,
-              tooltip:
-                "Bloom filter used to skip sequences the model has already seen, reducing repetition.",
-            },
+            ...(checkpoint
+              ? [
+                  {
+                    label: "Dedup filter",
+                    value: `${checkpoint.sourceFilter.kind} (${formatBytes(checkpoint.sourceFilter.bits.byteLength)})`,
+                    tooltip:
+                      "Bloom filter used to skip sequences the model has already seen, reducing repetition.",
+                  },
+                ]
+              : []),
             { label: "Learning rate", value: run.trainingConfig.learningRate.toExponential(2) },
             { label: "Batch size", value: formatNumber(run.trainingConfig.batchSize) },
             { label: "Seed", value: formatNumber(run.trainingConfig.seed) },
@@ -178,7 +188,7 @@ export function InspectView({ run }: { run: TrainingRunRecord }) {
         <h2 className="font-semibold text-lg">Runtime</h2>
         <InspectTable
           rows={[
-            { label: "Backend", value: backend, badge: true },
+            { label: "Backend", value: backend },
             {
               label: "AMP",
               value:
@@ -211,7 +221,7 @@ export function InspectView({ run }: { run: TrainingRunRecord }) {
 function InspectTable({
   rows,
 }: {
-  rows: Array<{ label: string; value: string; badge?: boolean; tooltip?: string }>;
+  rows: Array<{ label: string; value: string; tooltip?: string }>;
 }) {
   return (
     <dl className="divide-y divide-border/70 rounded-xl border border-border/70 bg-background">
@@ -224,9 +234,7 @@ function InspectTable({
             {row.label}
             {row.tooltip && <InspectTooltip>{row.tooltip}</InspectTooltip>}
           </dt>
-          <dd className="break-words text-sm">
-            {row.badge ? <Badge variant="outline">{row.value}</Badge> : row.value}
-          </dd>
+          <dd className="break-words text-sm">{row.value}</dd>
         </div>
       ))}
     </dl>
@@ -253,8 +261,23 @@ function InspectTooltip({ children }: { children: string }) {
   );
 }
 
-function countParameters(checkpoint: NonNullable<TrainingRunRecord["checkpoint"]>) {
-  return checkpoint.weights.reduce((total, tensor) => total + tensor.values.length, 0);
+function countModelParameters(modelConfig: ModelConfig) {
+  const embeddingParameters =
+    modelConfig.vocabSize * modelConfig.nEmbd + modelConfig.blockSize * modelConfig.nEmbd;
+  const attentionParameters = 4 * modelConfig.nEmbd * modelConfig.nEmbd;
+  const feedForwardParameters = 3 * modelConfig.nEmbd * modelConfig.mlpHiddenDim;
+  const layerNormParameters = 2 * modelConfig.nEmbd;
+  const finalParameters = modelConfig.nEmbd + modelConfig.nEmbd * modelConfig.vocabSize;
+
+  return (
+    embeddingParameters +
+    modelConfig.nLayer * (attentionParameters + feedForwardParameters + layerNormParameters) +
+    finalParameters
+  );
+}
+
+function getWeightTensorCount(modelConfig: ModelConfig) {
+  return 2 + modelConfig.nLayer * 7 + 2;
 }
 
 function formatArtifactValue(fileName: string, sizeBytes: number) {

@@ -14,6 +14,8 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>("list");
   const [draftName, setDraftName] = useState("");
   const [draftContent, setDraftContent] = useState("");
+  const [deleteModelDialogOpen, setDeleteModelDialogOpen] = useState(false);
+  const [isDeletingModel, setIsDeletingModel] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -22,10 +24,13 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
   const selectedFileContent = workspace.selectedFile?.content ?? "";
   const isEditorOpen = sidebarMode === "editor";
   const isSelectedRunTraining = selectedRun ? isTrainingRunInProgress(selectedRun.status) : false;
-  const completedActiveRun =
-    isEditorOpen && runs.active?.status === "completed" ? runs.active : null;
+  const resultsRun = selectedRun ?? runs.active;
   const activeRunTitle =
-    workspace.selectedFile?.title ?? workspace.selectedFile?.name ?? completedActiveRun?.name ?? "";
+    workspace.selectedFile?.title ?? workspace.selectedFile?.name ?? resultsRun?.name ?? "";
+  const titleRun =
+    runs.active && isTrainingRunInProgress(runs.active.status)
+      ? runs.active
+      : (selectedRun ?? runs.active);
   const canResumeSelectedRun =
     selectedRun && canResumeTrainingRun(selectedRun, training.config.steps);
 
@@ -79,14 +84,27 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
   }, [draftName, sidebarMode, workspace.selectedFile]);
 
   const displayedResults = useMemo(() => {
-    if (!completedActiveRun) {
+    if (!resultsRun) {
       return [];
     }
 
-    return (
-      completedActiveRun.generatedResults[formatTemperatureKey(generation.config.temperature)] ?? []
-    );
-  }, [completedActiveRun, generation.config.temperature]);
+    return resultsRun.generatedResults[formatTemperatureKey(generation.config.temperature)] ?? [];
+  }, [resultsRun, generation.config.temperature]);
+
+  const pendingResultIndexes = useMemo(() => {
+    if (!resultsRun) {
+      return new Set<number>();
+    }
+
+    const temperatureKey = formatTemperatureKey(generation.config.temperature);
+    const indexes = new Set<number>();
+    displayedResults.forEach((_, index) => {
+      if (generation.pendingSamples.has(`${resultsRun.id}:${temperatureKey}:${index}`)) {
+        indexes.add(index);
+      }
+    });
+    return indexes;
+  }, [displayedResults, generation.config.temperature, generation.pendingSamples, resultsRun]);
 
   const persistDraftFile = useCallback(async () => {
     if (!workspace.selectedFile) {
@@ -119,21 +137,23 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
     input.click();
   }, []);
 
+  const handleCloseEditor = useCallback(() => {
+    setSidebarMode("list");
+    void workspace.selectFile(null);
+  }, [workspace]);
+
   const handleOpenFile = useCallback(
     async (fileId: string) => {
+      if (workspace.selectedFile?.id === fileId) {
+        handleCloseEditor();
+        return;
+      }
+
       await workspace.selectFile(fileId);
       setSidebarMode("editor");
     },
-    [workspace],
+    [workspace, handleCloseEditor],
   );
-
-  const handleCloseEditor = useCallback(() => {
-    setSidebarMode("list");
-    generation.setActiveTab("generated");
-    setDraftName("");
-    setDraftContent("");
-    void workspace.selectFile(null);
-  }, [generation, workspace]);
 
   const handleDeleteSelectedFile = useCallback(async () => {
     if (!workspace.selectedFile) {
@@ -142,6 +162,20 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
 
     await workspace.removeFile(workspace.selectedFile.id);
   }, [workspace]);
+
+  const handleDeleteSelectedModel = useCallback(async () => {
+    if (!selectedRun) {
+      return;
+    }
+
+    setIsDeletingModel(true);
+    try {
+      await runs.remove(selectedRun.id);
+      setDeleteModelDialogOpen(false);
+    } finally {
+      setIsDeletingModel(false);
+    }
+  }, [runs, selectedRun]);
 
   const handleCreateFile = useCallback(async () => {
     const created = await workspace.createFile(`custom-${workspace.files.length + 1}.txt`);
@@ -183,23 +217,14 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
       generationConfig: generation.config,
       isTraining: isSelectedRunTraining,
       onBack: handleCloseEditor,
-      onResetLocalData: () => setResetDialogOpen(true),
       onDeleteFile:
         workspace.selectedFile?.source === "user" ? handleDeleteSelectedFile : undefined,
-      onDeleteModel: selectedRun
-        ? () => {
-            void runs.remove(selectedRun.id);
-          }
-        : undefined,
+      onDeleteModel: selectedRun ? () => setDeleteModelDialogOpen(true) : undefined,
       onDraftContentChange: setDraftContent,
       onDraftNameChange: setDraftName,
       onDownloadModel:
         selectedRun && (selectedRun.checkpoint || selectedRun.checkpointSavedAt)
           ? () => void runs.downloadArtifact(selectedRun.id, "model")
-          : undefined,
-      onEnsureRunDetails:
-        selectedRun && !selectedRun.checkpoint && selectedRun.checkpointSavedAt
-          ? () => void runs.ensureCheckpoint(selectedRun.id)
           : undefined,
       onGenerationConfigChange: generation.setConfig,
       onResumeTraining: canResumeSelectedRun ? () => void runs.resume(selectedRun.id) : undefined,
@@ -213,7 +238,9 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
     },
     fileInputRef,
     handleImportedFiles,
+    deleteModelDialogOpen,
     isEditorOpen,
+    isDeletingModel,
     listViewProps: {
       files: workspace.files,
       isHydrating: busyState.hydrating,
@@ -223,17 +250,27 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
       onOpenFile: (file: { id: string }) => handleOpenFile(file.id),
       onResetLocalData: () => setResetDialogOpen(true),
       runs: runs.all,
+      selectedFileId: workspace.selectedFile?.id,
     },
     resetDialogOpen,
-    runPanelProps: {
-      activeRun: completedActiveRun,
+    setDeleteModelDialogOpen,
+    resultsPanelProps: {
+      activeRun: resultsRun,
       activeTab: generation.activeTab,
       displayTitle: activeRunTitle,
       displayedResults,
+      generationProgress: generation.progress,
       generationConfig: generation.config,
       isGenerating: busyState.generating,
       isHydrating: busyState.hydrating,
-      onGenerate: () => generation.generateForActiveRun(generation.config.temperature),
+      onGenerate: () => {
+        if (resultsRun) {
+          void generation.generateForRun(resultsRun.id, generation.config.temperature);
+        } else {
+          void generation.generateForActiveRun(generation.config.temperature);
+        }
+      },
+      onResetLocalData: () => setResetDialogOpen(true),
       onTabChange: generation.setActiveTab,
       onTemperatureChange: (temperature: number) =>
         generation.setConfig((current) =>
@@ -242,10 +279,19 @@ export function useWorkspaceEditor(trainer: BrowserTrainerController) {
             temperature: Number(formatTemperatureKey(temperature)),
           }),
         ),
-      onToggleLike: generation.toggleLike,
+      onToggleLike: (value: string) => {
+        if (resultsRun) {
+          void generation.toggleLikeForRun(resultsRun.id, value);
+        } else {
+          void generation.toggleLike(value);
+        }
+      },
+      pendingResultIndexes,
       workerReady: busyState.workerReady,
     },
     setResetDialogOpen,
+    handleDeleteSelectedModel,
     handleResetLocalData,
+    titleRun,
   };
 }

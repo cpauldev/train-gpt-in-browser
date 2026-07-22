@@ -120,7 +120,7 @@ describe("trainer-types", () => {
     expect(resolveTrainingRunResumeTargetSteps(completedRun, 5_000)).toBe(8_000);
   });
 
-  it("keeps unfinished runs on their original target unless you raise it", () => {
+  it("keeps unfinished runs on their original target unless the next session extends it", () => {
     const interruptedRun = createRun({
       checkpointSavedAt: 1,
       status: "idle",
@@ -138,6 +138,7 @@ describe("trainer-types", () => {
     });
 
     expect(resolveTrainingRunResumeTargetSteps(interruptedRun)).toBe(3_000);
-    expect(resolveTrainingRunResumeTargetSteps(interruptedRun, 5_000)).toBe(5_000);
+    expect(resolveTrainingRunResumeTargetSteps(interruptedRun, 500)).toBe(3_000);
+    expect(resolveTrainingRunResumeTargetSteps(interruptedRun, 5_000)).toBe(7_300);
   });
 });

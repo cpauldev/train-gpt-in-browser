@@ -12,7 +12,11 @@ import {
   prepareDataset,
   sourceFilterMatches,
 } from "@/lib/trainer-core";
-import { AUTOSAVE_STEP_INTERVAL, SOURCE_FILTER_MAX_RETRIES } from "@/lib/trainer-defaults";
+import {
+  AUTOSAVE_STEP_INTERVAL,
+  DEFAULT_LOSS_READBACK_INTERVAL,
+  SOURCE_FILTER_MAX_RETRIES,
+} from "@/lib/trainer-defaults";
 import type {
   BackendPreference,
   GenerationConfig,
@@ -53,6 +57,7 @@ type ModelState = {
   lmHead: TrainableState;
   normF: TrainableState;
   ordered: TrainableState[];
+  variables: tf.Variable[];
   tokenEmbedding: TrainableState;
   positionEmbedding: TrainableState;
 };
@@ -61,7 +66,6 @@ type TrainingStepSummary = {
   checkpoint?: SerializedCheckpoint;
   completedSteps: number;
   elapsedSeconds: number;
-  generatedResults?: string[];
   logEntry: LogEntry;
   loss: number;
   stepsPerSecond: number;
@@ -210,7 +214,12 @@ export class BrowserTrainer {
     });
   }
 
-  async generateSamples(generationConfig: GenerationConfig, signal?: AbortSignal) {
+  async generateSamples(
+    generationConfig: GenerationConfig,
+    signal?: AbortSignal,
+    onSample?: (sample: string, sampleIndex: number) => Promise<void> | void,
+    onSampleText?: (sample: string, sampleIndex: number) => Promise<void> | void,
+  ) {
     const results: string[] = [];
     const samplingRng = new DreamPhraseRng(
       (this.runtimeRng.snapshot() ^ Date.now() ^ generationConfig.numSamples) >>> 0,
@@ -222,7 +231,12 @@ export class BrowserTrainer {
 
       for (let attempt = 0; attempt < SOURCE_FILTER_MAX_RETRIES; attempt += 1) {
         throwIfAborted(signal);
-        const candidate = await this.generateOneSample(generationConfig, samplingRng, signal);
+        const candidate = await this.generateOneSample(
+          generationConfig,
+          samplingRng,
+          signal,
+          (sample) => onSampleText?.(sample, sampleIndex),
+        );
         if (!candidate.trim()) {
           continue;
         }
@@ -239,19 +253,20 @@ export class BrowserTrainer {
       }
 
       results.push(accepted);
+      if (onSample) {
+        await onSample(accepted, sampleIndex);
+      }
     }
 
     return results;
   }
 
   async train({
-    generationConfig,
     onProgress,
     onStart,
     onTelemetry,
     signal,
   }: {
-    generationConfig: GenerationConfig;
     onProgress: (summary: TrainingStepSummary, isAutosave: boolean) => Promise<void> | void;
     onStart?: (logEntries: LogEntry[]) => Promise<void> | void;
     onTelemetry?: (point: TrainingTelemetryPoint) => Promise<void> | void;
@@ -287,27 +302,74 @@ export class BrowserTrainer {
     let lastTelemetryAt = startedAt;
     let lastTelemetrySteps = completedStepsBefore;
     let lastTelemetryTokens = totalTokensBefore;
+    let lastStepDiagnostics: TrainingTelemetryPoint["diagnostics"] | undefined;
 
     for (let step = 0; step < remainingTrainingSteps; step += 1) {
       throwIfAborted(signal);
+      const lossReadbackInterval = getLossReadbackInterval(this.trainingConfig);
       const learningRate =
         this.trainingConfig.learningRate *
         (1 - (completedStepsBefore + step) / Math.max(1, targetTotalSteps));
 
+      const stepNumber = step + 1;
+      const nextCompletedSteps = completedStepsBefore + stepNumber;
+      const isFinalStep = stepNumber === remainingTrainingSteps;
+      const shouldReport = stepNumber % this.trainingConfig.printEvery === 0 || isFinalStep;
+      const shouldAutosave = nextCompletedSteps % AUTOSAVE_STEP_INTERVAL === 0 || isFinalStep;
+      const shouldEmitTelemetryAfterStep =
+        Boolean(onTelemetry) && (performance.now() - lastTelemetryAt >= 250 || isFinalStep);
+
+      // Check if we need loss for this specific step based on the interval
+      const isLossIntervalStep = stepNumber % lossReadbackInterval === 0;
+
+      const shouldReadLoss =
+        shouldReport || shouldAutosave || shouldEmitTelemetryAfterStep || isLossIntervalStep;
+
+      const batchStartedAt = performance.now();
       const batch = createTrainingBatch(
         this.dataset.data,
         this.trainingConfig.batchSize,
         this.trainingConfig.model.blockSize,
         this.runtimeRng,
       );
+      const batchFinishedAt = performance.now();
 
-      const loss = await this.applyTrainingStep(batch.x, batch.y, learningRate);
+      const trainingStepStartedAt = performance.now();
+      const { lossPromise } = await this.applyTrainingStep(
+        batch.x,
+        batch.y,
+        learningRate,
+        shouldReadLoss,
+      );
+      const trainingStepFinishedAt = performance.now();
       throwIfAborted(signal);
       batch.x.dispose();
       batch.y.dispose();
 
-      finalLoss = loss;
-      completedSteps = completedStepsBefore + step + 1;
+      // Different logic based on the feedback mode:
+      // - Detailed (interval=1): Always await loss when read
+      // - Fast (interval>1): Only await loss when absolutely needed for reporting
+      let loss: number | null = null;
+      if (lossPromise) {
+        if (lossReadbackInterval === 1) {
+          // Detailed mode: always await to get fresh loss data every step
+          loss = await lossPromise;
+        } else {
+          // Fast mode: only await when we must have it for reporting/autosave/telemetry
+          if (shouldReport || shouldAutosave || shouldEmitTelemetryAfterStep) {
+            loss = await lossPromise;
+          }
+        }
+      }
+
+      lastStepDiagnostics = {
+        batchSeconds: Math.max((batchFinishedAt - batchStartedAt) / 1000, 0),
+        lossReadback: shouldReadLoss,
+        trainingStepSeconds: Math.max((trainingStepFinishedAt - trainingStepStartedAt) / 1000, 0),
+      };
+
+      finalLoss = loss ?? finalLoss;
+      completedSteps = nextCompletedSteps;
       totalTokens += this.trainingConfig.batchSize * this.trainingConfig.model.blockSize;
       const now = performance.now();
       this.resumeState = {
@@ -324,6 +386,7 @@ export class BrowserTrainer {
         const sessionElapsedSeconds = Math.max((now - startedAt) / 1000, 1e-9);
         const telemetryPoint: TrainingTelemetryPoint = {
           elapsedTimeSeconds: elapsedTrainingSecondsBefore + sessionElapsedSeconds,
+          diagnostics: lastStepDiagnostics,
           loss: finalLoss,
           step: completedSteps,
           stepsPerSecond: (completedSteps - lastTelemetrySteps) / elapsedSeconds,
@@ -332,19 +395,14 @@ export class BrowserTrainer {
           totalSteps: targetTotalSteps,
           totalTokens,
         };
-        throwIfAborted(signal);
-        await onTelemetry(telemetryPoint);
-        throwIfAborted(signal);
         lastTelemetryAt = now;
         lastTelemetrySteps = completedSteps;
         lastTelemetryTokens = totalTokens;
-      }
 
-      const shouldReport =
-        (step + 1) % this.trainingConfig.printEvery === 0 || step + 1 === remainingTrainingSteps;
-      const shouldAutosave =
-        completedSteps % Math.max(this.trainingConfig.printEvery, AUTOSAVE_STEP_INTERVAL) === 0 ||
-        completedSteps === targetTotalSteps;
+        throwIfAborted(signal);
+        await onTelemetry(telemetryPoint);
+        throwIfAborted(signal);
+      }
 
       if (shouldReport) {
         const elapsedSeconds = Math.max((now - startedAt) / 1000, 1e-9);
@@ -359,8 +417,9 @@ export class BrowserTrainer {
             `step/s ${stepsPerSecond.toFixed(2)}`,
           ].join("  "),
         );
+        const shouldAttachCheckpoint = shouldAutosave && !isFinalStep;
         const summary: TrainingStepSummary = {
-          checkpoint: shouldAutosave
+          checkpoint: shouldAttachCheckpoint
             ? await this.getCheckpoint(
                 completedSteps,
                 totalTokens,
@@ -378,7 +437,12 @@ export class BrowserTrainer {
           totalTokens,
         };
         throwIfAborted(signal);
-        await onProgress(summary, shouldAutosave);
+        await onProgress(summary, shouldAttachCheckpoint);
+        throwIfAborted(signal);
+      }
+
+      if (!shouldReadLoss && stepNumber % 16 === 0) {
+        await yieldToEventLoop();
         throwIfAborted(signal);
       }
     }
@@ -392,8 +456,6 @@ export class BrowserTrainer {
       finalLoss,
       totalElapsedTrainingSeconds,
     );
-    throwIfAborted(signal);
-    const generatedResults = await this.generateSamples(generationConfig, signal);
     const completionEntry = createLogEntry(
       `Training finished in ${elapsedSeconds.toFixed(1)} seconds on ${this.resolvedBackend}.`,
       "success",
@@ -405,7 +467,6 @@ export class BrowserTrainer {
         checkpoint,
         completedSteps,
         elapsedSeconds,
-        generatedResults,
         logEntry: completionEntry,
         loss: finalLoss,
         stepsPerSecond: remainingTrainingSteps / elapsedSeconds,
@@ -419,7 +480,6 @@ export class BrowserTrainer {
 
     return {
       checkpoint,
-      generatedResults,
     };
   }
 
@@ -447,21 +507,29 @@ export class BrowserTrainer {
     return this.resumeState;
   }
 
-  private async applyTrainingStep(x: tf.Tensor2D, y: tf.Tensor2D, learningRate: number) {
+  updateTrainingConfig(partialConfig: Partial<TrainingConfig>) {
+    this.trainingConfig = {
+      ...this.trainingConfig,
+      ...partialConfig,
+    };
+  }
+
+  private async applyTrainingStep(
+    x: tf.Tensor2D,
+    y: tf.Tensor2D,
+    learningRate: number,
+    readLoss: boolean,
+  ): Promise<{ loss: number | null; lossPromise: Promise<number> | null }> {
     const optimizerStep = this.optimizerStep + 1;
     const beta1Correction = 1 - this.trainingConfig.beta1 ** optimizerStep;
     const beta2Correction = 1 - this.trainingConfig.beta2 ** optimizerStep;
-    const variableList = this.model.ordered.map((item) => item.variable);
     const { grads, value } = tf.variableGrads(() => {
       const logits = this.forward(x);
       const flattenedLogits = logits.reshape([-1, this.trainingConfig.model.vocabSize]);
       const labels = y.reshape([-1]);
       const oneHot = tf.oneHot(labels, this.trainingConfig.model.vocabSize);
       return tf.losses.softmaxCrossEntropy(oneHot, flattenedLogits);
-    }, variableList);
-
-    const loss = Number((await value.data())[0] ?? Number.NaN);
-    value.dispose();
+    }, this.model.variables);
 
     for (const item of this.model.ordered) {
       const gradient = grads[item.variable.name];
@@ -492,14 +560,29 @@ export class BrowserTrainer {
       gradient.dispose();
     }
 
+    // Start reading loss asynchronously without awaiting
+    const lossPromise = readLoss
+      ? value.data().then((data) => {
+          const lossValue = Number(data[0] ?? Number.NaN);
+          value.dispose();
+          return lossValue;
+        })
+      : null;
+
+    // Dispose immediately if not reading loss
+    if (!readLoss) {
+      value.dispose();
+    }
+
     this.optimizerStep = optimizerStep;
-    return loss;
+    return { loss: null, lossPromise };
   }
 
   private async generateOneSample(
     generationConfig: GenerationConfig,
     rng: DreamPhraseRng,
     signal?: AbortSignal,
+    onText?: (sample: string) => Promise<void> | void,
   ) {
     const tokenIds = [this.dataset.tokenizer.bosId];
     const characters: string[] = [];
@@ -528,6 +611,9 @@ export class BrowserTrainer {
       }
 
       characters.push(nextCharacter);
+      if (onText) {
+        await onText(characters.join(""));
+      }
       tokenIds.push(nextId);
     }
 
@@ -584,9 +670,7 @@ export class BrowserTrainer {
       const qHeads = q.reshape([batchSize, sequenceLength, nHead, headDim]).transpose([0, 2, 1, 3]);
       const kHeads = k.reshape([batchSize, sequenceLength, nHead, headDim]).transpose([0, 2, 1, 3]);
       const vHeads = v.reshape([batchSize, sequenceLength, nHead, headDim]).transpose([0, 2, 1, 3]);
-      const attentionScores = tf
-        .matMul(qHeads, kHeads.transpose([0, 1, 3, 2]))
-        .div(Math.sqrt(headDim));
+      const attentionScores = tf.matMul(qHeads, kHeads, false, true).div(Math.sqrt(headDim));
       const maskedScores = attentionScores.add(this.getCausalMask(sequenceLength));
       const attentionWeights = tf.softmax(maskedScores, -1);
       const attended = tf
@@ -697,6 +781,20 @@ function buildTrainingStartLogs({
   return logs;
 }
 
+function getLossReadbackInterval(trainingConfig: Pick<TrainingConfig, "lossReadbackInterval">) {
+  const value = trainingConfig.lossReadbackInterval ?? DEFAULT_LOSS_READBACK_INTERVAL;
+  if (!Number.isFinite(value)) {
+    return DEFAULT_LOSS_READBACK_INTERVAL;
+  }
+  return Math.max(1, Math.floor(value));
+}
+
+function yieldToEventLoop() {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
 function createTrainingBatch(
   datasetData: Int32Array,
   batchSize: number,
@@ -801,6 +899,7 @@ function createModelState(
     lmHead,
     normF,
     ordered,
+    variables: ordered.map((item) => item.variable),
     positionEmbedding,
     tokenEmbedding,
   } satisfies ModelState;

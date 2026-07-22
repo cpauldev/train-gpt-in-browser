@@ -9,11 +9,11 @@ import {
   TextCursorInput,
   Trash2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { CodeEditorSurface } from "@/components/code-editor-surface";
 import { InspectView } from "@/components/inspect-view";
-import { SidebarFrameHeader } from "@/components/sidebar-frame-header";
-import { StatCard } from "@/components/stat-card";
+import { MetricCard } from "@/components/metric-card";
+import { PanelHeader } from "@/components/panel-header";
 import { TrainingLiveStats } from "@/components/training-live-stats";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,9 +31,10 @@ import {
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
+import { TextShimmer } from "@/components/ui/text-shimmer";
 import { Toggle } from "@/components/ui/toggle";
 import { clampTemperature, formatNumber } from "@/lib/trainer-core";
-import { formatDurationSeconds } from "@/lib/trainer-presentation";
+import { formatBytes, formatDurationSeconds } from "@/lib/trainer-presentation";
 import {
   createGenerationConfig,
   type DatasetTextSummary,
@@ -46,18 +47,16 @@ import {
 import { getLatestTrainingTelemetry } from "@/lib/training-telemetry";
 import { useAnimatedValue } from "@/lib/use-animated-value";
 
-export function SidebarEditorView({
+export function EditorPanel({
   canTrain,
   draftContent,
   draftName,
   generationConfig,
   isTraining,
   onBack,
-  onResetLocalData,
   onDeleteFile,
   onDeleteModel,
   onDownloadModel,
-  onEnsureRunDetails,
   onDraftContentChange,
   onDraftNameChange,
   onSaveContent,
@@ -76,11 +75,9 @@ export function SidebarEditorView({
   generationConfig: GenerationConfig;
   isTraining: boolean;
   onBack: () => void;
-  onResetLocalData: () => void;
   onDeleteFile?: () => void;
   onDeleteModel?: () => void;
   onDownloadModel?: () => void;
-  onEnsureRunDetails?: () => void | Promise<void>;
   onDraftContentChange: (value: string) => void;
   onDraftNameChange: (value: string) => void;
   onSaveContent?: (content: string) => void;
@@ -99,7 +96,6 @@ export function SidebarEditorView({
 }) {
   const [activeTab, setActiveTab] = useState<"details" | "training" | "source">("training");
   const [hasVisitedSourceTab, setHasVisitedSourceTab] = useState(false);
-  const [isLoadingRunDetails, setIsLoadingRunDetails] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [savedContent, setSavedContent] = useState(selectedFile?.content ?? "");
   const autoOpenedTrainingRunIdRef = useRef<string | null>(null);
@@ -117,6 +113,11 @@ export function SidebarEditorView({
   };
 
   const canContinueTraining = Boolean(onResumeTraining);
+  const modelArtifactSize = selectedRun?.artifacts?.model?.sizeBytes;
+  const downloadModelLabel =
+    modelArtifactSize === undefined
+      ? "Download model"
+      : `Download model (${formatBytes(modelArtifactSize)})`;
   const isStartingTraining = selectedRun?.status === "starting";
   const latestTrainingPoint = getLatestTrainingTelemetry(selectedRun?.telemetry ?? []);
   const isFinalizingTraining =
@@ -141,18 +142,21 @@ export function SidebarEditorView({
       ? "Continue training"
       : "Start training";
   const trainingActionIcon = isTraining ? (
-    <RefreshCw className="size-4 animate-spin" />
+    <Spinner />
   ) : canContinueTraining ? (
-    <RefreshCw className="size-4" />
+    <RefreshCw />
   ) : (
-    <Play className="size-4.5" />
+    <Play />
   );
   const trainingControlFields = createTrainingControlFields({
+    canContinueTraining,
     generationConfig,
+    lockModelControls: Boolean(selectedRun),
     onGenerationConfigChange,
     onTrainingConfigChange,
     trainingConfig,
   });
+  const shouldShimmerTrainingAction = isTraining;
 
   useEffect(() => {
     if (!selectedRun || !isTrainingRunInProgress(selectedRun.status)) {
@@ -178,43 +182,10 @@ export function SidebarEditorView({
     }
   }, [activeTab]);
 
-  useEffect(() => {
-    if (
-      activeTab !== "details" ||
-      !selectedRun ||
-      selectedRun.checkpoint ||
-      !selectedRun.checkpointSavedAt ||
-      isTrainingRunInProgress(selectedRun.status) ||
-      !onEnsureRunDetails
-    ) {
-      setIsLoadingRunDetails(false);
-      return;
-    }
-
-    let cancelled = false;
-    setIsLoadingRunDetails(true);
-    Promise.resolve(onEnsureRunDetails()).finally(() => {
-      if (!cancelled) {
-        setIsLoadingRunDetails(false);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeTab,
-    onEnsureRunDetails,
-    selectedRun,
-    selectedRun?.checkpoint,
-    selectedRun?.checkpointSavedAt,
-    selectedRun?.status,
-  ]);
-
   if (!selectedFile || !selectedFileSummary) {
     return (
       <Frame className="h-full overflow-hidden lg:min-h-0">
-        <SidebarFrameHeader onBack={onBack} onResetLocalData={onResetLocalData} title="Workspace" />
+        <PanelHeader onBack={onBack} title="Editor" />
         <FramePanel className="flex flex-1 items-center justify-center lg:min-h-0">
           <Empty>
             <EmptyHeader>
@@ -231,11 +202,7 @@ export function SidebarEditorView({
 
   return (
     <Frame className="h-full overflow-hidden lg:min-h-0">
-      <SidebarFrameHeader
-        onBack={onBack}
-        onResetLocalData={onResetLocalData}
-        title={selectedFile.title ?? selectedFile.name}
-      />
+      <PanelHeader onBack={onBack} title={selectedFile.title ?? selectedFile.name} />
 
       <FramePanel className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
         <Tabs
@@ -262,7 +229,7 @@ export function SidebarEditorView({
 
           <TabsPanel value="details" className="min-h-0 p-0">
             <div className="flex h-full min-h-0 flex-col">
-              <ScrollArea className="flex-1" scrollFade scrollbarGutter>
+              <ScrollArea className="flex-1" scrollFade>
                 <div className="space-y-6 px-4 py-4 lg:px-5 lg:py-5">
                   <section className="space-y-4">
                     <div className="flex flex-col items-start justify-between gap-3 lg:flex-row">
@@ -289,35 +256,26 @@ export function SidebarEditorView({
                     </Field>
 
                     <div className="grid gap-3 lg:grid-cols-2">
-                      <StatCard
+                      <MetricCard
                         label="Documents"
                         value={formatNumber(selectedFileSummary.documentCount)}
                       />
-                      <StatCard
+                      <MetricCard
                         label="Characters"
                         value={formatNumber(selectedFileSummary.characterCount)}
                       />
-                      <StatCard
+                      <MetricCard
                         label="Dataset tokens"
                         value={formatNumber(selectedFileSummary.tokenCount)}
                       />
-                      <StatCard
+                      <MetricCard
                         label="Tokenizer size"
                         value={formatNumber(selectedFileSummary.vocabSize)}
                       />
                     </div>
                   </section>
 
-                  {selectedRun?.checkpoint ? <InspectView run={selectedRun} /> : null}
-                  {selectedRun && !selectedRun.checkpoint && isLoadingRunDetails ? (
-                    <section className="space-y-3">
-                      <h2 className="font-semibold text-lg">Run</h2>
-                      <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-background px-4 py-3 text-muted-foreground text-sm">
-                        <Spinner className="size-4" />
-                        Loading run details...
-                      </div>
-                    </section>
-                  ) : null}
+                  {selectedRun ? <InspectView run={selectedRun} /> : null}
                 </div>
               </ScrollArea>
 
@@ -333,18 +291,18 @@ export function SidebarEditorView({
                             (!selectedRun.checkpoint && !selectedRun.checkpointSavedAt) ||
                             isTrainingRunInProgress(selectedRun.status)
                           }
-                          className="w-full gap-2"
+                          className="w-full"
                         >
-                          <Download className="size-4" />
-                          Download model
+                          <Download />
+                          {downloadModelLabel}
                         </Button>
                         <Button
                           variant="destructive-outline"
                           onClick={onDeleteModel}
                           disabled={isTrainingRunInProgress(selectedRun.status)}
-                          className="w-full gap-2"
+                          className="w-full"
                         >
-                          <Trash2 className="size-4" />
+                          <Trash2 />
                           Delete model
                         </Button>
                       </div>
@@ -355,7 +313,7 @@ export function SidebarEditorView({
                         onClick={onDeleteFile}
                         className="w-full gap-2"
                       >
-                        <Trash2 className="size-4" />
+                        <Trash2 />
                         Delete file
                       </Button>
                     ) : null}
@@ -367,7 +325,7 @@ export function SidebarEditorView({
 
           <TabsPanel value="training" keepMounted className="min-h-0 p-0">
             <div className="flex h-full min-h-0 flex-col">
-              <ScrollArea className="flex-1" scrollFade scrollbarGutter>
+              <ScrollArea className="flex-1" scrollFade>
                 {showControls ? (
                   <div className="space-y-4 px-4 py-4 lg:px-5 lg:py-5">
                     <div className="space-y-1">
@@ -381,6 +339,7 @@ export function SidebarEditorView({
                         field.kind === "select" ? (
                           <LabeledSelect
                             key={field.label}
+                            disabled={field.disabled}
                             label={field.label}
                             value={field.value}
                             onChange={field.onChange}
@@ -389,6 +348,7 @@ export function SidebarEditorView({
                         ) : (
                           <LabeledNumberField
                             key={field.label}
+                            disabled={field.disabled}
                             label={field.label}
                             step={field.step}
                             value={field.value}
@@ -420,14 +380,13 @@ export function SidebarEditorView({
                     className="min-w-0 flex-1 gap-2"
                   >
                     {trainingActionIcon}
-                    {trainingActionLabel}
+                    {shouldShimmerTrainingAction ? (
+                      <TextShimmer>{trainingActionLabel}</TextShimmer>
+                    ) : (
+                      trainingActionLabel
+                    )}
                     {trainingMetaLabel && (
-                      <Badge
-                        variant="outline"
-                        className="ml-auto shrink-0 border-current/15 bg-current/10 text-inherit tabular-nums"
-                      >
-                        {trainingMetaLabel}
-                      </Badge>
+                      <div className="ml-auto shrink-0 tabular-nums">{trainingMetaLabel}</div>
                     )}
                   </Button>
                   <Toggle
@@ -474,7 +433,7 @@ export function SidebarEditorView({
                   <Button
                     variant="outline"
                     disabled={!isDirty || isTraining}
-                    className="w-full min-w-0 gap-2 lg:flex-1"
+                    className="w-full min-w-0 lg:flex-1"
                     onClick={() => onDraftContentChange(savedContent)}
                   >
                     <RotateCcw />
@@ -482,7 +441,7 @@ export function SidebarEditorView({
                   </Button>
                   <Button
                     disabled={!isDirty || isTraining}
-                    className="w-full min-w-0 gap-2 lg:flex-1"
+                    className="w-full min-w-0 lg:flex-1"
                     onClick={handleSaveContent}
                   >
                     <Save />
@@ -508,6 +467,7 @@ function computeEtaSeconds(point: ReturnType<typeof getLatestTrainingTelemetry>)
 
 type TrainingControlField =
   | {
+      disabled?: boolean;
       kind: "number";
       label: string;
       onChange: (value: number) => void;
@@ -515,6 +475,7 @@ type TrainingControlField =
       value: number;
     }
   | {
+      disabled?: boolean;
       kind: "select";
       label: string;
       onChange: (value: string) => void;
@@ -523,12 +484,16 @@ type TrainingControlField =
     };
 
 function createTrainingControlFields({
+  canContinueTraining,
   generationConfig,
+  lockModelControls,
   onGenerationConfigChange,
   onTrainingConfigChange,
   trainingConfig,
 }: {
+  canContinueTraining: boolean;
   generationConfig: GenerationConfig;
+  lockModelControls: boolean;
   onGenerationConfigChange: (
     config: GenerationConfig | ((current: GenerationConfig) => GenerationConfig),
   ) => void;
@@ -538,6 +503,21 @@ function createTrainingControlFields({
   trainingConfig: TrainingConfig;
 }): TrainingControlField[] {
   return [
+    {
+      kind: "select",
+      label: "Feedback mode",
+      onChange: (value) => {
+        onTrainingConfigChange((current) => ({
+          ...current,
+          lossReadbackInterval: Number(value),
+        }));
+      },
+      options: [
+        { label: "Fast (updates every 16 steps)", value: "16" },
+        { label: "Detailed (updates every step)", value: "1" },
+      ],
+      value: String(trainingConfig.lossReadbackInterval ?? 16),
+    },
     {
       kind: "select",
       label: "Backend",
@@ -566,7 +546,7 @@ function createTrainingControlFields({
     },
     {
       kind: "number",
-      label: "Steps",
+      label: canContinueTraining ? "Additional steps" : "Steps",
       onChange: (value) =>
         onTrainingConfigChange((current) => ({
           ...current,
@@ -587,6 +567,7 @@ function createTrainingControlFields({
       value: trainingConfig.batchSize,
     },
     {
+      disabled: lockModelControls,
       kind: "number",
       label: "Block size",
       onChange: (value) =>
@@ -598,6 +579,7 @@ function createTrainingControlFields({
       value: trainingConfig.model.blockSize,
     },
     {
+      disabled: lockModelControls,
       kind: "number",
       label: "Layers",
       onChange: (value) =>
@@ -609,6 +591,7 @@ function createTrainingControlFields({
       value: trainingConfig.model.nLayer,
     },
     {
+      disabled: lockModelControls,
       kind: "number",
       label: "Embedding width",
       onChange: (value) =>
@@ -620,6 +603,7 @@ function createTrainingControlFields({
       value: trainingConfig.model.nEmbd,
     },
     {
+      disabled: lockModelControls,
       kind: "number",
       label: "Attention heads",
       onChange: (value) =>
@@ -682,20 +666,26 @@ function createTrainingControlFields({
 }
 
 function LabeledNumberField({
+  disabled,
   label,
   onChange,
   step,
   value,
 }: {
+  disabled?: boolean;
   label: string;
   onChange: (value: number) => void;
   step: number;
   value: number;
 }) {
+  const inputId = useId();
+
   return (
     <Field>
-      <FieldLabel>{label}</FieldLabel>
+      <FieldLabel htmlFor={inputId}>{label}</FieldLabel>
       <Input
+        disabled={disabled}
+        id={inputId}
         type="number"
         nativeInput
         step={step}
@@ -713,11 +703,13 @@ function LabeledNumberField({
 }
 
 function LabeledSelect({
+  disabled,
   label,
   onChange,
   options,
   value,
 }: {
+  disabled?: boolean;
   label: string;
   onChange: (value: string) => void;
   options: { label: string; value: string }[];
@@ -729,6 +721,7 @@ function LabeledSelect({
     <Field>
       <FieldLabel>{label}</FieldLabel>
       <Select
+        disabled={disabled}
         value={value}
         onValueChange={(nextValue) => {
           if (nextValue) {
@@ -737,9 +730,9 @@ function LabeledSelect({
         }}
       >
         <SelectTrigger>
-          <SelectValue>{selectedOption?.label ?? value}</SelectValue>
+          <SelectValue>{selectedOption?.label}</SelectValue>
         </SelectTrigger>
-        <SelectContent alignItemWithTrigger={false}>
+        <SelectContent>
           {options.map((option) => (
             <SelectItem key={option.value} value={option.value}>
               {option.label}
