@@ -7,17 +7,17 @@ import {
   type TrainingConfig,
 } from "@/lib/trainer-types";
 
-export const PRODUCT_NAME = "DreamPhraseGPT Browser Trainer";
-export const STORAGE_DB_NAME = "dreamphrasegpt-browser";
+export const PRODUCT_NAME = "Train GPT in Browser";
+export const STORAGE_DB_NAME = "train-gpt-in-browser";
 export const STORAGE_DB_VERSION = 3;
 export const SOURCE_FILTER_KIND = "bloom";
 export const SOURCE_FILTER_VERSION = 1;
 export const SOURCE_FILTER_FALSE_POSITIVE_RATE = 1e-4;
 export const SOURCE_FILTER_MAX_RETRIES = 40;
 export const FALLBACK_HASH_STEP = 0x9e3779b97f4a7c15n;
-export const ACTIVE_RUN_STORAGE_KEY = "dreamphrasegpt-browser:active-run";
-export const ACTIVE_FILE_STORAGE_KEY = "dreamphrasegpt-browser:active-file";
-export const TRAINING_CONFIG_STORAGE_KEY = "dreamphrasegpt-browser:training-config";
+export const ACTIVE_RUN_STORAGE_KEY = "train-gpt-in-browser:active-run";
+export const ACTIVE_FILE_STORAGE_KEY = "train-gpt-in-browser:active-file";
+export const TRAINING_CONFIG_STORAGE_KEY = "train-gpt-in-browser:training-config";
 export const AUTOSAVE_STEP_INTERVAL = 250;
 export const DEFAULT_LOSS_READBACK_INTERVAL = 16;
 const DEFAULT_BACKEND_PREFERENCE: BackendPreference = "auto";

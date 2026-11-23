@@ -1,9 +1,4 @@
 import onnxProto from "onnx-proto";
-
-import {
-  isoTimestampSeconds,
-  sanitizeDreamPhraseArtifactStem,
-} from "@/lib/dreamphrase-artifact-shared";
 import { PRODUCT_NAME } from "@/lib/trainer-defaults";
 import type {
   ModelDownloadFile,
@@ -11,11 +6,12 @@ import type {
   SourceFilterSnapshot,
   TokenizerSnapshot,
 } from "@/lib/trainer-types";
+import { isoTimestampSeconds, sanitizeArtifactStem } from "@/lib/transformer-artifact-shared";
 
 const { onnx } = onnxProto;
 
 const BUNDLE_MAGIC = "PDBGONNX";
-const BUNDLE_FORMAT = "dreamphrasegpt-onnx-bundle";
+const BUNDLE_FORMAT = "character-level-transformer-onnx-bundle";
 const BUNDLE_VERSION = 1;
 const BUNDLE_OPSET_VERSION = 11;
 const HEADER_LENGTH_BYTES = 4;
@@ -77,13 +73,13 @@ type GraphBuilder = {
   nodes: OnnxNode[];
 };
 
-export function buildDreamPhraseModelFile(
+export function buildModelFile(
   checkpoint: SerializedCheckpoint,
   runName: string,
-  sourceArtifact = `${sanitizeDreamPhraseArtifactStem(runName)}.browser-checkpoint`,
+  sourceArtifact = `${sanitizeArtifactStem(runName)}.browser-checkpoint`,
 ): ModelDownloadFile {
-  const fileStem = sanitizeDreamPhraseArtifactStem(runName);
-  const onnxBytes = buildDreamPhraseOnnxBytes(checkpoint);
+  const fileStem = sanitizeArtifactStem(runName);
+  const onnxBytes = buildOnnxBytes(checkpoint);
   const headerBytes = encoder.encode(
     JSON.stringify(createBundleHeader(checkpoint, sourceArtifact)),
   );
@@ -116,7 +112,7 @@ function createBundleHeader(checkpoint: SerializedCheckpoint, sourceArtifact: st
   };
 }
 
-function buildDreamPhraseOnnxBytes(checkpoint: SerializedCheckpoint) {
+function buildOnnxBytes(checkpoint: SerializedCheckpoint) {
   const builder = createGraphBuilder(checkpoint);
 
   addSharedShapeNodes(builder);
@@ -470,7 +466,7 @@ function encodeOnnxModel(builder: GraphBuilder) {
       input: [
         tensorValueInfo("idx", onnx.TensorProto.DataType.INT64, [1, sharedTensorNames.seqLen]),
       ],
-      name: "dreamphrasegpt",
+      name: "character_level_transformer",
       node: builder.nodes,
       output: [
         tensorValueInfo("logits", onnx.TensorProto.DataType.FLOAT, [

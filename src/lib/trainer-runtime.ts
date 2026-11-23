@@ -6,10 +6,10 @@ import {
   clampTemperature,
   createLogEntry,
   createSectionLogEntry,
-  DreamPhraseRng,
   formatNumber,
   type PreparedDataset,
   prepareDataset,
+  SeededRng,
   sourceFilterMatches,
 } from "@/lib/trainer-core";
 import {
@@ -82,7 +82,7 @@ export class BrowserTrainer {
   private positionIndexCache = new Map<number, tf.Tensor1D>();
   private resolvedBackend: ResolvedBackend;
   private resumeState: SerializedCheckpoint["resumeState"];
-  private runtimeRng: DreamPhraseRng;
+  private runtimeRng: SeededRng;
   private trainingConfig: TrainingConfig;
   private sourceFile: Pick<WorkspaceFile, "content" | "id" | "name">;
 
@@ -110,7 +110,7 @@ export class BrowserTrainer {
     this.optimizerStep = optimizerStep;
     this.resolvedBackend = resolvedBackend;
     this.resumeState = resumeState;
-    this.runtimeRng = new DreamPhraseRng(rngState);
+    this.runtimeRng = new SeededRng(rngState);
     this.sourceFile = sourceFile;
     this.trainingConfig = trainingConfig;
   }
@@ -121,10 +121,10 @@ export class BrowserTrainer {
   ) {
     validateModelConfig(trainingConfig.model);
     const resolvedBackend = await resolveBackendPreference(trainingConfig.requestedBackend);
-    const datasetRng = new DreamPhraseRng(trainingConfig.seed);
+    const datasetRng = new SeededRng(trainingConfig.seed);
     const dataset = prepareDataset(file.content, trainingConfig.model.blockSize, datasetRng);
     const modelConfig = { ...trainingConfig.model, vocabSize: dataset.tokenizer.vocabSize };
-    const initRng = new DreamPhraseRng(trainingConfig.seed ^ 0xa5a5a5a5);
+    const initRng = new SeededRng(trainingConfig.seed ^ 0xa5a5a5a5);
     const model = createModelState(modelConfig, initRng);
 
     return new BrowserTrainer({
@@ -161,7 +161,7 @@ export class BrowserTrainer {
     };
     const model = createModelState(
       checkpoint.modelConfig,
-      new DreamPhraseRng(checkpoint.trainingConfig.seed),
+      new SeededRng(checkpoint.trainingConfig.seed),
       checkpoint.weights,
       checkpoint.optimizerState,
     );
@@ -221,7 +221,7 @@ export class BrowserTrainer {
     onSampleText?: (sample: string, sampleIndex: number) => Promise<void> | void,
   ) {
     const results: string[] = [];
-    const samplingRng = new DreamPhraseRng(
+    const samplingRng = new SeededRng(
       (this.runtimeRng.snapshot() ^ Date.now() ^ generationConfig.numSamples) >>> 0,
     );
 
@@ -580,7 +580,7 @@ export class BrowserTrainer {
 
   private async generateOneSample(
     generationConfig: GenerationConfig,
-    rng: DreamPhraseRng,
+    rng: SeededRng,
     signal?: AbortSignal,
     onText?: (sample: string) => Promise<void> | void,
   ) {
@@ -799,7 +799,7 @@ function createTrainingBatch(
   datasetData: Int32Array,
   batchSize: number,
   blockSize: number,
-  rng: DreamPhraseRng,
+  rng: SeededRng,
 ) {
   const maxStart = datasetData.length - blockSize - 1;
   const xValues = new Int32Array(batchSize * blockSize);
@@ -820,7 +820,7 @@ function createTrainingBatch(
 
 function createModelState(
   modelConfig: ModelConfig,
-  rng: DreamPhraseRng,
+  rng: SeededRng,
   serializedWeights?: SerializedTensor[],
   optimizerState?: OptimizerStateSnapshot,
 ) {
@@ -909,7 +909,7 @@ function deserializeOrCreateTensor(
   serialized: SerializedTensor | undefined,
   shape: number[],
   init: "normal" | "ones" | "zeros",
-  rng: DreamPhraseRng,
+  rng: SeededRng,
 ) {
   if (serialized) {
     return tf.variable(
@@ -936,7 +936,7 @@ function deserializeOrCreateTensor(
   return tf.variable(tf.tensor(values, shape, "float32"));
 }
 
-function createNormalArray(size: number, rng: DreamPhraseRng, stdDev: number) {
+function createNormalArray(size: number, rng: SeededRng, stdDev: number) {
   const values = new Float32Array(size);
   let hasSpare = false;
   let spare = 0;
@@ -1067,7 +1067,7 @@ async function serializeCheckpoint({
   };
 }
 
-function sampleLogitIndex(logits: number[], temperature: number, rng: DreamPhraseRng) {
+function sampleLogitIndex(logits: number[], temperature: number, rng: SeededRng) {
   const scaledTemperature = 1 / temperature;
   let maxScaledLogit = Number.NEGATIVE_INFINITY;
 

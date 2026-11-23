@@ -1,10 +1,10 @@
-export function sanitizeDreamPhraseArtifactStem(value: string) {
+export function sanitizeArtifactStem(value: string) {
   return (
     value
       .trim()
       .replace(/[^a-z0-9._-]+/giu, "-")
       .replace(/^-+|-+$/gu, "")
-      .toLowerCase() || "dreamphrasegpt"
+      .toLowerCase() || "character_level_transformer"
   );
 }
 

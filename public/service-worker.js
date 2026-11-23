@@ -1,4 +1,4 @@
-const CACHE_NAME = "dreamphrasegpt-browser-v1";
+const CACHE_NAME = "train-gpt-in-browser-v1";
 const CACHE_URLS_MESSAGE_TYPE = "CACHE_URLS";
 const NAVIGATION_FALLBACKS = ["./index.html", "./"];
 const PRECACHE_URLS = [
@@ -51,7 +51,9 @@ async function precacheAppShell() {
 async function activateServiceWorker() {
   const cacheKeys = await caches.keys();
   await Promise.all(
-    cacheKeys.filter((cacheKey) => cacheKey !== CACHE_NAME).map((cacheKey) => caches.delete(cacheKey)),
+    cacheKeys
+      .filter((cacheKey) => cacheKey !== CACHE_NAME)
+      .map((cacheKey) => caches.delete(cacheKey)),
   );
   await self.clients.claim();
 }

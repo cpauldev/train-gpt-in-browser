@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { buildDreamPhraseArtifactSet } from "@/lib/dreamphrase-artifacts";
 import { DEFAULT_TRAINING_CONFIG } from "@/lib/trainer-defaults";
 import {
   createWorkspaceFile,
@@ -23,6 +22,7 @@ import {
 } from "@/lib/trainer-storage";
 import { createCheckpointFixture } from "@/lib/trainer-test-fixtures";
 import type { TrainingRunRecord } from "@/lib/trainer-types";
+import { buildArtifactSet } from "@/lib/transformer-artifacts";
 
 describe("trainer-storage", () => {
   beforeEach(async () => {
@@ -143,7 +143,7 @@ describe("trainer-storage", () => {
     };
 
     await saveTrainingRun(run);
-    await saveTrainingRunArtifacts(run, buildDreamPhraseArtifactSet(checkpoint, run.name));
+    await saveTrainingRunArtifacts(run, buildArtifactSet(checkpoint, run.name));
 
     const [listedRun] = await listTrainingRuns();
     const restoredRun = await getTrainingRun(run.id);

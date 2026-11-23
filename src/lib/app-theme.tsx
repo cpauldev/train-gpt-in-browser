@@ -28,17 +28,9 @@ const FALLBACK_THEME_CONTEXT: ThemeContextValue = {
 
 const ThemeContext = createContext<ThemeContextValue>(FALLBACK_THEME_CONTEXT);
 
-function getInitialThemePreference() {
-  if (typeof window === "undefined") {
-    return "system" satisfies ThemePreference;
-  }
-
-  return readStoredThemePreference(window.localStorage);
-}
-
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const systemPrefersDark = useMediaQuery("(prefers-color-scheme: dark)");
-  const [preference, setPreference] = useState<ThemePreference>(getInitialThemePreference);
+  const [preference, setPreference] = useState<ThemePreference>(readStoredThemePreference);
   const resolvedTheme = useMemo(
     () => resolveThemePreference(preference, systemPrefersDark),
     [preference, systemPrefersDark],
@@ -49,7 +41,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    writeStoredThemePreference(preference, window.localStorage);
+    writeStoredThemePreference(preference);
   }, [preference]);
 
   useEffect(() => {
@@ -66,11 +58,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
 
     const handleStorage = (event: StorageEvent) => {
-      if (event.storageArea !== window.localStorage || event.key !== THEME_STORAGE_KEY) {
+      if (event.key !== THEME_STORAGE_KEY) {
         return;
       }
 
-      setPreference(readStoredThemePreference(window.localStorage));
+      setPreference(readStoredThemePreference());
     };
 
     window.addEventListener("storage", handleStorage);
@@ -99,7 +91,7 @@ export function initializeAppTheme() {
     return null;
   }
 
-  const preference = readStoredThemePreference(window.localStorage);
+  const preference = readStoredThemePreference();
   const resolvedTheme = applyThemePreference(
     document.documentElement,
     preference,

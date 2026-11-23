@@ -18,7 +18,7 @@ import type {
 
 const encoder = new TextEncoder();
 const SECTION_TITLE_OVERRIDES: Record<string, string> = {
-  dreamphrasegpt: "DreamPhraseGPT",
+  character_level_transformer: "Character-Level Transformer",
 };
 
 export type PreparedDataset = {
@@ -29,7 +29,7 @@ export type PreparedDataset = {
   tokenizer: TokenizerSnapshot;
 };
 
-export class DreamPhraseRng {
+export class SeededRng {
   private state: number;
 
   constructor(seed: number) {
@@ -77,7 +77,7 @@ export function parseDatasetDocuments(text: string) {
     .filter(Boolean);
 }
 
-export function prepareDataset(content: string, blockSize: number, rng: DreamPhraseRng) {
+export function prepareDataset(content: string, blockSize: number, rng: SeededRng) {
   const documents = parseDatasetDocuments(content);
 
   if (documents.length === 0) {
@@ -203,7 +203,7 @@ export function createSectionLogEntry(title: string) {
   return createLogEntry(`--- ${formatSectionTitle(title)} ---`, "section");
 }
 
-export function shuffleInPlace<T>(items: T[], rng: DreamPhraseRng) {
+export function shuffleInPlace<T>(items: T[], rng: SeededRng) {
   for (let index = items.length - 1; index > 0; index -= 1) {
     const swapIndex = rng.nextInt(index + 1);
     const next = items[index];
@@ -307,5 +307,5 @@ export function clampTemperature(value: number) {
 
 export function getRunName(file: Pick<WorkspaceFile, "name">) {
   const stem = file.name.replace(/\.txt$/iu, "");
-  return stem || "dreamphrasegpt";
+  return stem || "character_level_transformer";
 }

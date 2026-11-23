@@ -1325,11 +1325,8 @@ export function useBrowserTrainer() {
         throw new Error("This run does not have a saved checkpoint yet.");
       }
 
-      const { buildDreamPhraseArtifactSet } = await import("@/lib/dreamphrase-artifacts");
-      const artifactSet = buildDreamPhraseArtifactSet(
-        checkpointedRun.checkpoint,
-        checkpointedRun.name,
-      );
+      const { buildArtifactSet } = await import("@/lib/transformer-artifacts");
+      const artifactSet = buildArtifactSet(checkpointedRun.checkpoint, checkpointedRun.name);
       await cacheRunExport(checkpointedRun, artifactSet);
       return artifactSet;
     },

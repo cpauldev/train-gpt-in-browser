@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { initializeAppTheme } from "@/lib/app-theme";
 
 import {
   applyThemePreference,
@@ -8,9 +9,18 @@ import {
   THEME_COLOR_BY_MODE,
   THEME_MEDIA_QUERY,
   THEME_STORAGE_KEY,
+  writeStoredThemePreference,
 } from "@/lib/theme";
 
 describe("theme", () => {
+  it("initializes and updates the theme when localStorage access is blocked", () => {
+    vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+      throw new DOMException("Blocked", "SecurityError");
+    });
+    expect(readStoredThemePreference()).toBe("system");
+    expect(() => writeStoredThemePreference("dark")).not.toThrow();
+    expect(() => initializeAppTheme()).not.toThrow();
+  });
   it("falls back to system when the stored value is invalid", () => {
     const storage = {
       getItem: () => "sepia",

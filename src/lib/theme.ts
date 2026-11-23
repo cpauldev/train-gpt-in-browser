@@ -1,7 +1,7 @@
 export type ThemePreference = "system" | "light" | "dark";
 export type ResolvedTheme = "light" | "dark";
 
-export const THEME_STORAGE_KEY = "dreamphrasegpt-browser:theme";
+export const THEME_STORAGE_KEY = "train-gpt-in-browser:theme";
 export const THEME_MEDIA_QUERY = "(prefers-color-scheme: dark)";
 
 export const THEME_COLOR_BY_MODE: Record<ResolvedTheme, string> = {
@@ -17,7 +17,9 @@ export function readStoredThemePreference(
   storage?: Pick<Storage, "getItem"> | null,
 ): ThemePreference {
   try {
-    const storedValue = storage?.getItem(THEME_STORAGE_KEY);
+    const persistentStorage =
+      storage === undefined && typeof window !== "undefined" ? window.localStorage : storage;
+    const storedValue = persistentStorage?.getItem(THEME_STORAGE_KEY);
     return isThemePreference(storedValue) ? storedValue : "system";
   } catch {
     return "system";
@@ -29,6 +31,8 @@ export function writeStoredThemePreference(
   storage?: Pick<Storage, "removeItem" | "setItem"> | null,
 ) {
   try {
+    storage =
+      storage === undefined && typeof window !== "undefined" ? window.localStorage : storage;
     if (!storage) {
       return;
     }

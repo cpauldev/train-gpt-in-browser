@@ -1,4 +1,5 @@
 import { type DBSchema, type IDBPDatabase, openDB } from "idb";
+import { migrateTrainerDatabase, STORAGE_MIGRATION_MARKER } from "@/lib/storage-migration";
 import { createId } from "@/lib/trainer-core";
 import {
   ACTIVE_FILE_STORAGE_KEY,
@@ -78,6 +79,15 @@ export async function getTrainerDb() {
           database.createObjectStore("checkpoints", { keyPath: "id" });
         }
       },
+    }).then(async (database) => {
+      try {
+        await migrateTrainerDatabase(database.name);
+        return database;
+      } catch (error) {
+        database.close();
+        dbPromise = null;
+        throw error;
+      }
     });
   }
 
@@ -392,6 +402,7 @@ export async function resetTrainerStorage() {
     transaction.objectStore("files").clear(),
     transaction.objectStore("runs").clear(),
   ]);
+  await transaction.objectStore("app").put({ key: STORAGE_MIGRATION_MARKER, value: "1" });
   await transaction.done;
   await Promise.all(artifacts.map(deleteStoredArtifactFile));
 }

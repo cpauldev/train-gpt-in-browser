@@ -1,15 +1,14 @@
 import onnxProto from "onnx-proto";
 import { describe, expect, it } from "vitest";
-
-import { buildDreamPhraseModelFile } from "@/lib/dreamphrase-bundle";
 import { createCheckpointFixture } from "@/lib/trainer-test-fixtures";
+import { buildModelFile } from "@/lib/transformer-bundle";
 
 const { onnx } = onnxProto;
 
-describe("dreamphrase-bundle", () => {
-  it("exports a DreamPhrase-compatible .model bundle with ONNX bytes", () => {
+describe("transformer-bundle", () => {
+  it("exports a CharacterTransformer-compatible .model bundle with ONNX bytes", () => {
     const checkpoint = createCheckpointFixture();
-    const exported = buildDreamPhraseModelFile(checkpoint, "Fixture Run");
+    const exported = buildModelFile(checkpoint, "Fixture Run");
     const bundleBytes = new Uint8Array(exported.value);
     const magic = new TextDecoder().decode(bundleBytes.subarray(0, 8));
     const headerLength = new DataView(exported.value).getUint32(8, true);
@@ -24,7 +23,7 @@ describe("dreamphrase-bundle", () => {
     expect(exported.fileName).toBe("fixture-run.model");
     expect(magic).toBe("PDBGONNX");
     expect(header).toMatchObject({
-      format: "dreamphrasegpt-onnx-bundle",
+      format: "character-level-transformer-onnx-bundle",
       source_artifact: "fixture-run.browser-checkpoint",
       tokenizer: {
         block_size: checkpoint.tokenizer.blockSize,

@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildBloomSourceFilter,
-  DreamPhraseRng,
   parseDatasetDocuments,
   prepareDataset,
+  SeededRng,
   sourceFilterMatches,
   summarizeDatasetText,
   tokenizeDocuments,
@@ -46,7 +46,7 @@ describe("trainer-core", () => {
   });
 
   it("prepares a deterministic dataset with tokenizer metadata", () => {
-    const dataset = prepareDataset("alpha\nbeta\ngamma\n", 4, new DreamPhraseRng(42));
+    const dataset = prepareDataset("alpha\nbeta\ngamma\n", 4, new SeededRng(42));
 
     expect(dataset.stats.documentCount).toBe(3);
     expect(dataset.stats.tokenCount).toBe(dataset.data.length);

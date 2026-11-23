@@ -1,7 +1,7 @@
 {
   "name": "Train GPT in Browser",
   "short_name": "Train GPT",
-  "description": "Train a small character-level GPT offline in your browser, resume local runs, and export DreamPhraseGPT-compatible .model files.",
+  "description": "Train a small character-level GPT offline in your browser, resume local runs, and export Character-Level Transformer-compatible .model files.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
